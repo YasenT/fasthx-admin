@@ -29,6 +29,24 @@
 </div>
 {% endif %}
 
+<!-- Charts -->
+{% if dashboard_charts %}
+<div class="row g-3 mb-4">
+    {% for chart in dashboard_charts %}
+    <div class="col-12 col-lg-{{ chart.width or 6 }}">
+        <div class="card">
+            <div class="card-header">
+                <h6 class="mb-0">{{ chart.title }}</h6>
+            </div>
+            <div class="card-body">
+                <div id="dashboard-chart-{{ loop.index0 }}"></div>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
 <div class="row g-3">
     <!-- Recent items table -->
     {% if dashboard_table %}
@@ -143,4 +161,101 @@
     </div>
     {% endif %}
 </div>
+{% endblock %}
+
+{% block extra_js %}
+{% if dashboard_charts %}
+<script src="https://cdn.jsdelivr.net/npm/apexcharts@3.54.1"></script>
+<script>
+(function() {
+    var chartConfigs = {{ dashboard_charts | tojson }};
+    var chartInstances = [];
+
+    function isDark() {
+        return document.documentElement.getAttribute('data-bs-theme') === 'dark';
+    }
+
+    function applyTheme(data) {
+        var dark = isDark();
+        if (!data.chart) data.chart = {};
+        data.chart.background = 'transparent';
+        data.chart.foreColor = dark ? '#adb5bd' : '#495057';
+        data.theme = { mode: dark ? 'dark' : 'light' };
+        if (!data.grid) data.grid = {};
+        data.grid.borderColor = dark ? '#374151' : '#e5e7eb';
+        data.grid.strokeDashArray = 3;
+        if (!data.legend) data.legend = {};
+        data.legend.labels = { colors: dark ? '#adb5bd' : '#495057' };
+        if (!data.tooltip) data.tooltip = {};
+        data.tooltip.theme = dark ? 'dark' : 'light';
+    }
+
+    function parseEventHandlers(data) {
+        if (data.chart && data.chart.events) {
+            var events = data.chart.events;
+            for (var key in events) {
+                if (typeof events[key] === 'string') {
+                    try {
+                        events[key] = new Function(
+                            'event', 'chartContext', 'config',
+                            events[key]
+                                .replace(/^function\s*\([^)]*\)\s*\{/, '')
+                                .replace(/\}\s*$/, '')
+                        );
+                    } catch (e) {
+                        console.error('Failed to parse event handler ' + key + ':', e);
+                        delete events[key];
+                    }
+                }
+            }
+        }
+    }
+
+    function loadChart(cfg, index) {
+        var el = document.querySelector('#dashboard-chart-' + index);
+        if (!el) return;
+
+        if (cfg.url) {
+            fetch(cfg.url)
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    if (cfg.colors && !data.colors) data.colors = cfg.colors;
+                    applyTheme(data);
+                    parseEventHandlers(data);
+                    var chart = new ApexCharts(el, data);
+                    chart.render();
+                    chartInstances.push(chart);
+                })
+                .catch(function(e) { console.error('Chart load error (' + cfg.title + '):', e); });
+        } else if (cfg.data) {
+            var data = JSON.parse(JSON.stringify(cfg.data));
+            if (cfg.colors && !data.colors) data.colors = cfg.colors;
+            applyTheme(data);
+            parseEventHandlers(data);
+            var chart = new ApexCharts(el, data);
+            chart.render();
+            chartInstances.push(chart);
+        }
+    }
+
+    function loadAllCharts() {
+        chartInstances.forEach(function(c) { c.destroy(); });
+        chartInstances = [];
+        chartConfigs.forEach(function(cfg, i) { loadChart(cfg, i); });
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+        loadAllCharts();
+        var observer = new MutationObserver(function(mutations) {
+            mutations.forEach(function(m) {
+                if (m.attributeName === 'data-bs-theme') {
+                    loadAllCharts();
+                }
+            });
+        });
+        observer.observe(document.documentElement, { attributes: true });
+    });
+})();
+</script>
+{% endif %}
 {% endblock %}
