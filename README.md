@@ -1422,21 +1422,144 @@ The auto-generated CRUD views handle model pages. For custom pages like dashboar
 
 ### Dashboard example
 
+The built-in `dashboard.html` template renders four sections: **summary cards**, a **recent items table**, a **status breakdown** panel, and **quick action** buttons. Each section is driven by template context variables you pass from your route.
+
 ```python
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, db: Session = Depends(get_db)):
-    stats = {
-        "total_devices": db.query(Device).count(),
-        "online": db.query(Device).filter(Device.status == DeviceStatus.ONLINE).count(),
-    }
+    total = db.query(Device).count()
+    online = db.query(Device).filter(Device.status == "online").count()
+    error = db.query(Device).filter(Device.status == "error").count()
+
     return admin.templates.TemplateResponse("dashboard.html", {
         "request": request,
-        "stats": stats,
-        "active_page": "dashboard",   # Highlights "Dashboard" in the sidebar
+        "active_page": "dashboard",       # highlights sidebar item
+        "dashboard_cards": [...],          # summary cards (see below)
+        "recent_edges": [...],             # recent items table rows
+        "stats": {...},                    # status breakdown + sidebar stats
     })
 ```
 
-Set `active_page` to match a sidebar link's `name` to highlight it. The built-in dashboard template (`dashboard.html`) provides summary cards, a recent items table, status breakdown, and quick action buttons.
+Set `active_page` to match a sidebar link's `name` to highlight it.
+
+### Summary cards
+
+Pass a list of dicts as `dashboard_cards`. Each card is a clickable link with a large value, label, and icon.
+
+| Key | Required | Description |
+|---|---|---|
+| `label` | yes | Card title text (e.g. "Total Devices") |
+| `value` | yes | The number or text to display prominently |
+| `icon` | yes | Bootstrap Icons name without the `bi-` prefix (e.g. `"shield"`, `"check-circle"`) |
+| `link` | yes | URL the card links to when clicked |
+| `color` | no | CSS class for the value text (e.g. `"text-success"`, `"text-danger"`) |
+| `icon_color` | no | CSS class for the icon (e.g. `"text-warning"`). Defaults to `"text-primary"` |
+| `bg` | no | CSS class for the icon background (e.g. `"bg-success-subtle"`). Defaults to `"bg-primary-subtle"` |
+
+```python
+dashboard_cards = [
+    {
+        "label": "Total Devices",
+        "value": total,
+        "icon": "shield",
+        "link": "/devices",
+    },
+    {
+        "label": "Online",
+        "value": online,
+        "color": "text-success",
+        "icon": "check-circle",
+        "icon_color": "text-success",
+        "bg": "bg-success-subtle",
+        "link": "/devices?q=online",
+    },
+    {
+        "label": "Errors",
+        "value": error,
+        "color": "text-danger",
+        "icon": "exclamation-triangle",
+        "icon_color": "text-danger",
+        "bg": "bg-danger-subtle",
+        "link": "/devices?q=error",
+    },
+]
+```
+
+Cards are rendered in a 4-column grid (`col-md-3`). Add up to 4 cards for a single row, or more — they will wrap automatically.
+
+### Recent items table
+
+Pass a list of model instances as `recent_edges`. The default template renders a table with columns for hostname, serial number, customer, and a live-polling status cell. To customise the table columns and layout, override `dashboard.html` with your own template (see [Using custom templates](#using-custom-templates)).
+
+```python
+recent_edges = (
+    db.query(Device)
+    .order_by(Device.id.desc())
+    .limit(10)
+    .all()
+)
+```
+
+### Status breakdown and sidebar stats
+
+Pass a `stats` dict to populate the status breakdown panel and summary counters in the sidebar.
+
+```python
+stats = {
+    "status_breakdown": {
+        "online": 12,
+        "deploying": 3,
+        "error": 1,
+    },
+    "total_customers": db.query(Customer).count(),
+    "total_orchestrators": db.query(Orchestrator).count(),
+}
+```
+
+The `status_breakdown` keys are rendered using the `partials/status_cell.html` partial, which maps status names to colored badges (online = green, deploying = yellow, error = red, etc.). Any extra keys in `stats` (like `total_customers`) are shown below the breakdown.
+
+### Quick actions
+
+The default template includes a quick actions card with buttons linking to common actions (e.g. a wizard, create forms). To change the quick action buttons, override `dashboard.html` with your own template.
+
+### Customising the dashboard layout
+
+If the built-in layout doesn't fit your needs, create your own `dashboard.html` that extends `base.html`:
+
+```html
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="row g-3 mb-4">
+    {% for card in dashboard_cards %}
+    <div class="col-md-3">
+        <a href="{{ card.link }}" class="text-decoration-none">
+            <div class="card summary-card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <div class="summary-value {{ card.color or '' }}">{{ card.value }}</div>
+                            <div class="summary-label">{{ card.label }}</div>
+                        </div>
+                        <div class="summary-icon {{ card.bg or 'bg-primary-subtle' }}">
+                            <i class="bi bi-{{ card.icon }} fs-4 {{ card.icon_color or 'text-primary' }}"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </a>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Add your own sections here -->
+{% endblock %}
+```
+
+Place this in your custom templates directory and pass it to `Admin(app, templates=templates)`. You get access to all the standard [template context variables](#template-context-variables) plus whatever you pass from your route.
 
 ### Root redirect
 
