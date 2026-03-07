@@ -299,11 +299,11 @@ class CRUDView:
             ]
 
         self.router = APIRouter()
-        self._setup_routes()
         self._setup_htmx_polling_routes()
         self._setup_ajax_select_routes()
         self._setup_decorated_endpoints()
         self.setup_endpoints()
+        self._setup_routes()
 
     def _setup_ajax_select_routes(self):
         """Register HTMX search endpoints for form_ajax_refs fields."""
