@@ -440,7 +440,7 @@ class CRUDView:
                 continue
 
             meta = fn._endpoint_meta
-            path = meta["path"].replace("{name}", self.name)
+            path = meta["path"].replace("{name}", self.name).replace("{prefix}", f"/{self.name}")
 
             bound = fn.__get__(self, type(self))
 
