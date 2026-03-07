@@ -1422,7 +1422,7 @@ The auto-generated CRUD views handle model pages. For custom pages like dashboar
 
 ### Dashboard example
 
-The built-in `dashboard.html` template renders four sections: **summary cards**, a **recent items table**, a **status breakdown** panel, and **quick action** buttons. Each section is driven by template context variables you pass from your route.
+The built-in `dashboard.html` template is fully data-driven. It renders four optional sections — **summary cards**, a **recent items table**, a **status breakdown** panel, and **quick action** buttons — all configured entirely from Python. Each section only renders if you pass the corresponding context variable, so you can mix and match.
 
 ```python
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -1433,24 +1433,25 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
 
     return admin.templates.TemplateResponse("dashboard.html", {
         "request": request,
-        "active_page": "dashboard",       # highlights sidebar item
-        "dashboard_cards": [...],          # summary cards (see below)
-        "recent_edges": [...],             # recent items table rows
-        "stats": {...},                    # status breakdown + sidebar stats
+        "active_page": "dashboard",
+        "dashboard_cards": [...],       # summary cards
+        "dashboard_table": {...},       # recent items table
+        "dashboard_stats": {...},       # status breakdown sidebar
+        "dashboard_actions": [...],     # quick action buttons
     })
 ```
 
 Set `active_page` to match a sidebar link's `name` to highlight it.
 
-### Summary cards
+### Summary cards (`dashboard_cards`)
 
-Pass a list of dicts as `dashboard_cards`. Each card is a clickable link with a large value, label, and icon.
+A list of dicts. Each card is a clickable link with a large value, label, and icon. Cards are rendered in a 4-column grid (`col-md-3`) and wrap automatically.
 
 | Key | Required | Description |
 |---|---|---|
 | `label` | yes | Card title text (e.g. "Total Devices") |
 | `value` | yes | The number or text to display prominently |
-| `icon` | yes | Bootstrap Icons name without the `bi-` prefix (e.g. `"shield"`, `"check-circle"`) |
+| `icon` | yes | [Bootstrap Icons](https://icons.getbootstrap.com/) name without the `bi-` prefix (e.g. `"shield"`, `"check-circle"`) |
 | `link` | yes | URL the card links to when clicked |
 | `color` | no | CSS class for the value text (e.g. `"text-success"`, `"text-danger"`) |
 | `icon_color` | no | CSS class for the icon (e.g. `"text-warning"`). Defaults to `"text-primary"` |
@@ -1485,81 +1486,154 @@ dashboard_cards = [
 ]
 ```
 
-Cards are rendered in a 4-column grid (`col-md-3`). Add up to 4 cards for a single row, or more — they will wrap automatically.
+### Recent items table (`dashboard_table`)
 
-### Recent items table
+A dict that defines the table title, columns, and data. No template override needed — columns and rendering are configured from Python.
 
-Pass a list of model instances as `recent_edges`. The default template renders a table with columns for hostname, serial number, customer, and a live-polling status cell. To customise the table columns and layout, override `dashboard.html` with your own template (see [Using custom templates](#using-custom-templates)).
+| Key | Required | Description |
+|---|---|---|
+| `title` | no | Table header text. Defaults to `"Recent Items"` |
+| `link` | no | URL for the "View All" button |
+| `link_text` | no | Button text. Defaults to `"View All"` |
+| `columns` | yes | List of column definitions (see below) |
+| `items` | yes | List of dicts or SQLAlchemy model instances to display as rows |
+
+**Column definition keys:**
+
+| Key | Required | Description |
+|---|---|---|
+| `key` | yes | Attribute name or dict key to read from each item |
+| `label` | yes | Column header text |
+| `link` | no | URL template with `{id}` placeholder — renders the cell as a clickable link (e.g. `"/devices/{id}"`) |
+| `code` | no | If `true`, renders the value in `<code>` tags |
+| `status` | no | If `true`, renders the value as a colored status badge via `partials/status_cell.html` |
+
+If none of `link`, `code`, or `status` are set, the value renders as plain text.
 
 ```python
-recent_edges = (
-    db.query(Device)
-    .order_by(Device.id.desc())
-    .limit(10)
-    .all()
-)
+dashboard_table = {
+    "title": "Recent Devices",
+    "link": "/devices",
+    "columns": [
+        {"key": "name", "label": "Name", "link": "/devices/{id}"},
+        {"key": "serial", "label": "Serial", "code": True},
+        {"key": "region", "label": "Region"},
+        {"key": "status", "label": "Status", "status": True},
+    ],
+    "items": db.query(Device).order_by(Device.id.desc()).limit(10).all(),
+}
 ```
 
-### Status breakdown and sidebar stats
-
-Pass a `stats` dict to populate the status breakdown panel and summary counters in the sidebar.
+Items can be **dicts** or **SQLAlchemy model objects** — the template handles both. When using model objects, make sure the `key` values match the model's attribute names. For computed or relationship values, pass dicts instead:
 
 ```python
-stats = {
+dashboard_table = {
+    "title": "Recent Orders",
+    "link": "/orders",
+    "columns": [
+        {"key": "id", "label": "Order #", "link": "/orders/{id}"},
+        {"key": "customer_name", "label": "Customer"},
+        {"key": "total", "label": "Total"},
+        {"key": "status", "label": "Status", "status": True},
+    ],
+    "items": [
+        {
+            "id": o.id,
+            "customer_name": o.customer.name,
+            "total": f"${o.total:.2f}",
+            "status": o.status.value,
+        }
+        for o in db.query(Order).order_by(Order.id.desc()).limit(10).all()
+    ],
+}
+```
+
+### Status breakdown and counters (`dashboard_stats`)
+
+A dict that populates the sidebar panel with status badges and summary counters.
+
+| Key | Required | Description |
+|---|---|---|
+| `title` | no | Panel header text. Defaults to `"Status Breakdown"` |
+| `status_breakdown` | no | Dict of `{status_name: count}` — each entry renders as a status badge with a count |
+| `counters_title` | no | Heading above the counters section |
+| `counters` | no | List of `{"label": "...", "value": ...}` dicts shown below the breakdown |
+
+```python
+dashboard_stats = {
+    "title": "Status Breakdown",
     "status_breakdown": {
         "online": 12,
         "deploying": 3,
         "error": 1,
     },
-    "total_customers": db.query(Customer).count(),
-    "total_orchestrators": db.query(Orchestrator).count(),
+    "counters_title": "Summary",
+    "counters": [
+        {"label": "Total Customers", "value": db.query(Customer).count()},
+        {"label": "Total Regions", "value": db.query(Region).count()},
+    ],
 }
 ```
 
-The `status_breakdown` keys are rendered using the `partials/status_cell.html` partial, which maps status names to colored badges (online = green, deploying = yellow, error = red, etc.). Any extra keys in `stats` (like `total_customers`) are shown below the breakdown.
+The `status_breakdown` keys are rendered using `partials/status_cell.html`, which maps known status names to colored badges (online = green, deploying = yellow, error = red, etc.). Unknown status names render as a grey badge with the name as-is.
 
-### Quick actions
+### Quick actions (`dashboard_actions`)
 
-The default template includes a quick actions card with buttons linking to common actions (e.g. a wizard, create forms). To change the quick action buttons, override `dashboard.html` with your own template.
+A list of dicts. Each entry renders as a button in the sidebar.
 
-### Customising the dashboard layout
+| Key | Required | Description |
+|---|---|---|
+| `label` | yes | Button text |
+| `url` | yes | URL the button links to |
+| `icon` | no | Bootstrap Icons name without the `bi-` prefix |
+| `class` | no | CSS class for the button. Defaults to `"btn-outline-secondary"` |
 
-If the built-in layout doesn't fit your needs, create your own `dashboard.html` that extends `base.html`:
-
-```html
-{% extends "base.html" %}
-
-{% block title %}Dashboard{% endblock %}
-{% block page_title %}Dashboard{% endblock %}
-
-{% block content %}
-<div class="row g-3 mb-4">
-    {% for card in dashboard_cards %}
-    <div class="col-md-3">
-        <a href="{{ card.link }}" class="text-decoration-none">
-            <div class="card summary-card">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <div class="summary-value {{ card.color or '' }}">{{ card.value }}</div>
-                            <div class="summary-label">{{ card.label }}</div>
-                        </div>
-                        <div class="summary-icon {{ card.bg or 'bg-primary-subtle' }}">
-                            <i class="bi bi-{{ card.icon }} fs-4 {{ card.icon_color or 'text-primary' }}"></i>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </a>
-    </div>
-    {% endfor %}
-</div>
-
-<!-- Add your own sections here -->
-{% endblock %}
+```python
+dashboard_actions = [
+    {"label": "Deploy Wizard", "url": "/wizard", "icon": "magic", "class": "btn-primary"},
+    {"label": "Add Device", "url": "/devices/create", "icon": "plus-lg"},
+    {"label": "Add Customer", "url": "/customers/create", "icon": "plus-lg"},
+]
 ```
 
-Place this in your custom templates directory and pass it to `Admin(app, templates=templates)`. You get access to all the standard [template context variables](#template-context-variables) plus whatever you pass from your route.
+### Full example
+
+Putting it all together:
+
+```python
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request, db: Session = Depends(get_db)):
+    total = db.query(Customer).count()
+    active = db.query(Customer).filter(Customer.status == "active").count()
+
+    return admin.templates.TemplateResponse("dashboard.html", {
+        "request": request,
+        "active_page": "dashboard",
+        "dashboard_cards": [
+            {"label": "Total", "value": total, "icon": "people", "link": "/customers"},
+            {"label": "Active", "value": active, "icon": "check-circle",
+             "color": "text-success", "icon_color": "text-success",
+             "bg": "bg-success-subtle", "link": "/customers?q=active"},
+        ],
+        "dashboard_table": {
+            "title": "Recent Customers",
+            "link": "/customers",
+            "columns": [
+                {"key": "name", "label": "Name", "link": "/customers/{id}"},
+                {"key": "email", "label": "Email"},
+                {"key": "status", "label": "Status", "status": True},
+            ],
+            "items": db.query(Customer).order_by(Customer.id.desc()).limit(10).all(),
+        },
+        "dashboard_stats": {
+            "status_breakdown": {"active": active, "inactive": total - active},
+            "counters": [{"label": "Total Customers", "value": total}],
+        },
+        "dashboard_actions": [
+            {"label": "Add Customer", "url": "/customers/create", "icon": "plus-lg", "class": "btn-primary"},
+        ],
+    })
+```
 
 ### Root redirect
 

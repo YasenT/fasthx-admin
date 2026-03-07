@@ -495,16 +495,6 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
         .all()
     )
 
-    stats = {
-        "total_edges": total_edges,
-        "online": online,
-        "deploying": deploying,
-        "error": error,
-        "status_breakdown": status_breakdown,
-        "total_customers": db.query(Customer).count(),
-        "total_orchestrators": db.query(Orchestrator).count(),
-    }
-
     dashboard_cards = [
         {
             "label": "Total Edges",
@@ -541,11 +531,49 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
         },
     ]
 
+    dashboard_table = {
+        "title": "Recent Edge Devices",
+        "link": "/edges",
+        "columns": [
+            {"key": "hostname", "label": "Hostname", "link": "/edges/{id}"},
+            {"key": "serial_number", "label": "Serial", "code": True},
+            {"key": "customer_name", "label": "Customer"},
+            {"key": "status_value", "label": "Status", "status": True},
+        ],
+        "items": [
+            {
+                "id": e.id,
+                "hostname": e.hostname,
+                "serial_number": e.serial_number,
+                "customer_name": e.customer.name if e.customer else "N/A",
+                "status_value": e.status.value,
+            }
+            for e in recent_edges
+        ],
+    }
+
+    dashboard_stats = {
+        "title": "Status Breakdown",
+        "status_breakdown": status_breakdown,
+        "counters_title": "Counts",
+        "counters": [
+            {"label": "Customers", "value": db.query(Customer).count()},
+            {"label": "Orchestrators", "value": db.query(Orchestrator).count()},
+        ],
+    }
+
+    dashboard_actions = [
+        {"label": "Deploy Wizard", "url": "/wizard", "icon": "magic", "class": "btn-primary"},
+        {"label": "Add Edge", "url": "/edges/create", "icon": "plus-lg"},
+        {"label": "Add Customer", "url": "/customers/create", "icon": "plus-lg"},
+    ]
+
     return admin.templates.TemplateResponse("dashboard.html", {
         "request": request,
-        "stats": stats,
         "dashboard_cards": dashboard_cards,
-        "recent_edges": recent_edges,
+        "dashboard_table": dashboard_table,
+        "dashboard_stats": dashboard_stats,
+        "dashboard_actions": dashboard_actions,
         "active_page": "dashboard",
     })
 
