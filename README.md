@@ -1496,7 +1496,7 @@ A dict that defines the table title, columns, and data. No template override nee
 | `link` | no | URL for the "View All" button |
 | `link_text` | no | Button text. Defaults to `"View All"` |
 | `columns` | yes | List of column definitions (see below) |
-| `items` | yes | List of dicts or SQLAlchemy model instances to display as rows |
+| `rows` | yes | List of dicts or SQLAlchemy model instances to display as rows |
 
 **Column definition keys:**
 
@@ -1520,7 +1520,7 @@ dashboard_table = {
         {"key": "region", "label": "Region"},
         {"key": "status", "label": "Status", "status": True},
     ],
-    "items": db.query(Device).order_by(Device.id.desc()).limit(10).all(),
+    "rows": db.query(Device).order_by(Device.id.desc()).limit(10).all(),
 }
 ```
 
@@ -1536,7 +1536,7 @@ dashboard_table = {
         {"key": "total", "label": "Total"},
         {"key": "status", "label": "Status", "status": True},
     ],
-    "items": [
+    "rows": [
         {
             "id": o.id,
             "customer_name": o.customer.name,
@@ -1623,7 +1623,7 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
                 {"key": "email", "label": "Email"},
                 {"key": "status", "label": "Status", "status": True},
             ],
-            "items": db.query(Customer).order_by(Customer.id.desc()).limit(10).all(),
+            "rows": db.query(Customer).order_by(Customer.id.desc()).limit(10).all(),
         },
         "dashboard_stats": {
             "status_breakdown": {"active": active, "inactive": total - active},

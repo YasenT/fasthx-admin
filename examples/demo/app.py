@@ -540,7 +540,7 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
             {"key": "customer_name", "label": "Customer"},
             {"key": "status_value", "label": "Status", "status": True},
         ],
-        "items": [
+        "rows": [
             {
                 "id": e.id,
                 "hostname": e.hostname,
