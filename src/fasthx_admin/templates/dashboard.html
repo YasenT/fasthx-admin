@@ -244,7 +244,7 @@
         chartConfigs.forEach(function(cfg, i) { loadChart(cfg, i); });
     }
 
-    document.addEventListener('DOMContentLoaded', function() {
+    function init() {
         loadAllCharts();
         var observer = new MutationObserver(function(mutations) {
             mutations.forEach(function(m) {
@@ -254,7 +254,13 @@
             });
         });
         observer.observe(document.documentElement, { attributes: true });
-    });
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
 })();
 </script>
 {% endif %}
