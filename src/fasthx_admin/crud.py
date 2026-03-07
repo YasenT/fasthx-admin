@@ -847,7 +847,7 @@ class Admin:
             from jinja2 import FileSystemLoader
             loader = self.templates.env.loader
             existing = loader.searchpath if hasattr(loader, 'searchpath') else [loader.searchpath]
-            self.templates.env.loader = FileSystemLoader(existing + list(extra_templates_dirs))
+            self.templates.env.loader = FileSystemLoader(list(extra_templates_dirs) + existing)
 
         # Mount built-in static files
         if mount_statics:
