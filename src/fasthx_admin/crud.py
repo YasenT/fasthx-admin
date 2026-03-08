@@ -547,7 +547,7 @@ class CRUDView:
                         label = view.column_labels.get(filt_key, filt_key.replace("_", " ").title()) if view.column_labels else filt_key.replace("_", " ").title()
                         filter_options[filt_key] = {
                             "label": label,
-                            "values": [str(v.value) if hasattr(v, "value") else str(v) for v in distinct_vals],
+                            "choices": [str(v.value) if hasattr(v, "value") else str(v) for v in distinct_vals],
                         }
 
             context = {

@@ -59,7 +59,7 @@
     <select class="form-select form-select-sm" style="width: auto; min-width: 120px;"
             onchange="applyFilter('{{ filt_key }}', this.value)">
         <option value="">{{ filt.label }}</option>
-        {% for val in filt.values %}
+        {% for val in filt.choices %}
         <option value="{{ val }}" {% if active_filters.get(filt_key) == val %}selected{% endif %}>{{ val }}</option>
         {% endfor %}
     </select>
