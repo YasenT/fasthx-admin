@@ -7,7 +7,9 @@ This replaces Flask-Admin's ModelView with full control over rendering.
 
 from __future__ import annotations
 
+import csv
 import functools
+import io
 import json
 import math
 from collections import defaultdict
@@ -16,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, FastAPI, Request, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import inspect, or_, String, cast
@@ -182,6 +184,7 @@ class CRUDView:
     can_edit = True
     can_delete = True
     htmx_columns = None
+    export_types = None
     list_template = "list.html"
     create_template = "form.html"
     edit_template = "form.html"
@@ -534,6 +537,74 @@ class CRUDView:
                 return templates.TemplateResponse("partials/table_body.html", context)
 
             return templates.TemplateResponse(view.list_template, context)
+
+        if view.export_types:
+            @self.router.get(f"/{self.name}/export/{{fmt}}")
+            async def export_view(
+                fmt: str,
+                q: str = "",
+                sort: str = "",
+                order: str = "asc",
+                db: Session = Depends(get_db),
+            ):
+                if fmt not in view.export_types:
+                    return HTMLResponse("Export format not supported", status_code=400)
+
+                query = view._build_query(db, search=q, sort=sort, order=order)
+                items = query.all()
+
+                # Get column keys and labels
+                col_keys = [c["key"] for c in view.columns_meta]
+                col_labels = [c["label"] for c in view.columns_meta]
+
+                # Build rows of raw values
+                rows_data = []
+                for item in items:
+                    row = []
+                    for key in col_keys:
+                        value = getattr(item, key, "")
+                        if hasattr(value, "value"):
+                            value = value.value
+                        if value is None:
+                            value = ""
+                        row.append(str(value))
+                    rows_data.append(row)
+
+                if fmt == "csv":
+                    output = io.StringIO()
+                    writer = csv.writer(output)
+                    writer.writerow(col_labels)
+                    writer.writerows(rows_data)
+                    return StreamingResponse(
+                        iter([output.getvalue()]),
+                        media_type="text/csv",
+                        headers={"Content-Disposition": f"attachment; filename={view.name}.csv"},
+                    )
+
+                if fmt == "xlsx":
+                    try:
+                        import openpyxl
+                    except ImportError:
+                        return HTMLResponse(
+                            "openpyxl is required for XLSX export: pip install openpyxl",
+                            status_code=500,
+                        )
+                    wb = openpyxl.Workbook()
+                    ws = wb.active
+                    ws.title = view.display_name
+                    ws.append(col_labels)
+                    for row in rows_data:
+                        ws.append(row)
+                    output = io.BytesIO()
+                    wb.save(output)
+                    output.seek(0)
+                    return StreamingResponse(
+                        output,
+                        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        headers={"Content-Disposition": f"attachment; filename={view.name}.xlsx"},
+                    )
+
+                return HTMLResponse("Unsupported format", status_code=400)
 
         @self.router.get(f"/{self.name}/create", response_class=HTMLResponse)
         async def create_form(

@@ -24,6 +24,18 @@
                 <span class="spinner-border spinner-border-sm"></span>
             </span>
         </div>
+        {% if view.export_types %}
+        <div class="btn-group">
+            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                <i class="bi bi-download"></i> Export
+            </button>
+            <ul class="dropdown-menu">
+                {% for fmt in view.export_types %}
+                <li><a class="dropdown-item" href="/{{ view.name }}/export/{{ fmt }}?q={{ search }}&sort={{ sort }}&order={{ order }}">{{ fmt|upper }}</a></li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
         {% if view.can_create %}
         <a href="/{{ view.name }}/create" class="btn btn-primary btn-sm">
             <i class="bi bi-plus-lg"></i> Create

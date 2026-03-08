@@ -660,6 +660,33 @@ All default to `True`.
 
 ---
 
+## Export
+
+Add CSV and/or XLSX export buttons to any list view with the `export_types` attribute:
+
+```python
+class CustomerView(CRUDView):
+    model = Customer
+    export_types = ["csv", "xlsx"]
+```
+
+This adds an "Export" dropdown next to the Create button in the list view. The export:
+
+- Uses the columns defined in `column_list` with labels from `column_labels` as headers
+- Respects the current search query and sort order
+- Downloads all matching records (not just the current page)
+
+**Supported formats:**
+
+| Format | Dependency |
+|---|---|
+| `csv` | None (built-in) |
+| `xlsx` | `openpyxl` (`pip install openpyxl`) |
+
+The export endpoint is at `/{name}/export/{format}` and accepts the same `q`, `sort`, and `order` query params as the list view.
+
+---
+
 ## Custom Endpoints
 
 Add custom routes to a CRUDView using the `@CRUDView.endpoint` decorator. These are registered alongside the auto-generated CRUD routes.
@@ -1779,6 +1806,7 @@ fasthx-admin is designed as a drop-in conceptual replacement for Flask-Admin. He
 | `form_args` | `form_widget_overrides` | Renamed, supports HTMX attrs |
 | `form_ajax_refs` | `form_ajax_refs` | Same concept; uses HTMX instead of Select2 |
 | `column_extra_row_actions` | `row_actions` | List of dicts with HTMX attrs |
+| `column_export_list` | `export_types` | List of format strings (`["csv", "xlsx"]`) |
 | `@expose()` custom endpoints | `setup_endpoints()` override | Define on `self.router` |
 | `Markup()` in formatters | Raw HTML strings | Templates use `\| safe` filter |
 
