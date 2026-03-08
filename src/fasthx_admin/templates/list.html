@@ -46,7 +46,7 @@
         </div>
         {% endif %}
         {% if filter_defs %}
-        <button class="btn btn-outline-secondary btn-sm" type="button" onclick="addFilter()">
+        <button class="btn btn-outline-secondary btn-sm" type="button" id="btn-add-filter">
             <i class="bi bi-funnel"></i> Add Filter
         </button>
         {% endif %}
@@ -58,12 +58,13 @@
     </div>
 </div>
 
+{# Active filter badges #}
 {% if filter_defs and active_filters %}
 <div id="active-filters" class="mb-3">
     {% for f in active_filters %}
     <span class="badge bg-primary me-1 py-2 px-3" style="font-size: 0.85em;">
         {{ f[3] }} <small class="opacity-75">{{ f[1]|replace('_', ' ') }}</small> "{{ f[2] }}"
-        <a href="#" onclick="removeFilter({{ loop.index0 }}); return false;" class="text-white ms-1" style="text-decoration: none;">&times;</a>
+        <a href="#" class="remove-filter text-white ms-1" data-idx="{{ loop.index0 }}" style="text-decoration: none;">&times;</a>
     </span>
     {% endfor %}
     <a href="/{{ view.name }}?q={{ search }}&sort={{ sort }}&order={{ order }}" class="btn btn-outline-secondary btn-sm ms-1">
@@ -72,22 +73,33 @@
 </div>
 {% endif %}
 
+{# New filter row — all options rendered server-side #}
 {% if filter_defs %}
-<div id="new-filter-row" class="d-none mb-3">
-    <div class="d-flex gap-2 align-items-center">
-        <select id="filter-col" class="form-select form-select-sm" style="width: auto;" onchange="onFilterColChange()">
-            <option value="">Column...</option>
+<div id="new-filter-row" style="display:none;" class="mb-3">
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+        {# Column select #}
+        <select id="filter-col" class="form-select form-select-sm" style="width:auto; min-width:140px;">
+            <option value="">-- Column --</option>
             {% for fd in filter_defs %}
             <option value="{{ fd.col }}">{{ fd.label }}</option>
             {% endfor %}
         </select>
-        <select id="filter-op" class="form-select form-select-sm" style="width: auto;" onchange="onFilterOpChange()">
-            <option value="">Operation...</option>
+
+        {# Operation select — one <optgroup> per column, JS shows/hides #}
+        <select id="filter-op" class="form-select form-select-sm" style="width:auto; min-width:160px;">
+            <option value="">-- Operation --</option>
+            {% for fd in filter_defs %}
+            {% for op_key, op_label in fd.ops %}
+            <option value="{{ op_key }}" data-col="{{ fd.col }}" style="display:none;">{{ op_label }}</option>
+            {% endfor %}
+            {% endfor %}
         </select>
-        <input id="filter-val" type="text" class="form-control form-control-sm" placeholder="Value..." style="width: 200px;"
-               onkeydown="if(event.key==='Enter'){applyNewFilter(); return false;}">
-        <button class="btn btn-primary btn-sm" onclick="applyNewFilter()">Apply</button>
-        <button class="btn btn-outline-secondary btn-sm" onclick="cancelFilter()"><i class="bi bi-x-lg"></i></button>
+
+        {# Value input #}
+        <input id="filter-val" type="text" class="form-control form-control-sm" style="width:200px;" placeholder="Value...">
+
+        <button id="btn-apply-filter" class="btn btn-primary btn-sm">Apply</button>
+        <button id="btn-cancel-filter" class="btn btn-outline-secondary btn-sm"><i class="bi bi-x-lg"></i></button>
     </div>
 </div>
 {% endif %}
@@ -149,104 +161,121 @@
 
 {% if filter_defs %}
 <script>
-var filterDefs = {{ filter_defs|tojson }};
-var filterDefMap = {};
-filterDefs.forEach(function(fd) { filterDefMap[fd.col] = fd; });
-
-function addFilter() {
-    var row = document.getElementById('new-filter-row');
-    row.classList.remove('d-none');
+(function() {
     var colSelect = document.getElementById('filter-col');
-    colSelect.value = '';
-    document.getElementById('filter-op').innerHTML = '<option value="">Operation...</option>';
-    document.getElementById('filter-val').value = '';
-    colSelect.focus();
-}
+    var opSelect  = document.getElementById('filter-op');
+    var valInput  = document.getElementById('filter-val');
+    var filterRow = document.getElementById('new-filter-row');
 
-function onFilterColChange() {
-    var col = document.getElementById('filter-col').value;
-    var opSelect = document.getElementById('filter-op');
-    opSelect.innerHTML = '';
-    if (col && filterDefMap[col]) {
-        filterDefMap[col].ops.forEach(function(op) {
-            var opt = document.createElement('option');
-            opt.value = op[0];
-            opt.textContent = op[1];
-            opSelect.appendChild(opt);
-        });
-    }
-    var valInput = document.getElementById('filter-val');
-    if (col && filterDefMap[col]) {
-        var firstOp = filterDefMap[col].ops[0][0];
-        if (firstOp === 'empty') {
-            valInput.classList.add('d-none');
+    /* Show/hide operation options based on selected column */
+    function updateOps() {
+        var col = colSelect.value;
+        var ops = opSelect.options;
+        var firstVisible = null;
+        for (var i = 1; i < ops.length; i++) {
+            var show = (ops[i].getAttribute('data-col') === col);
+            ops[i].style.display = show ? '' : 'none';
+            ops[i].disabled = !show;
+            if (show && !firstVisible) firstVisible = ops[i];
+        }
+        /* Auto-select first visible operation */
+        if (firstVisible) {
+            opSelect.value = firstVisible.value;
         } else {
-            valInput.classList.remove('d-none');
+            opSelect.value = '';
+        }
+        /* Hide value input for "empty" operation */
+        if (opSelect.value === 'empty') {
+            valInput.style.display = 'none';
+        } else {
+            valInput.style.display = '';
         }
     }
-}
 
-function onFilterOpChange() {
-    var op = document.getElementById('filter-op').value;
-    var valInput = document.getElementById('filter-val');
-    if (op === 'empty') {
-        valInput.classList.add('d-none');
-    } else {
-        valInput.classList.remove('d-none');
-    }
-}
+    /* Show the filter row */
+    document.getElementById('btn-add-filter').addEventListener('click', function() {
+        filterRow.style.display = '';
+        colSelect.value = '';
+        opSelect.value = '';
+        valInput.value = '';
+        valInput.style.display = '';
+        /* Hide all ops until column is chosen */
+        for (var i = 1; i < opSelect.options.length; i++) {
+            opSelect.options[i].style.display = 'none';
+            opSelect.options[i].disabled = true;
+        }
+        colSelect.focus();
+    });
 
-function applyNewFilter() {
-    var col = document.getElementById('filter-col').value;
-    var op = document.getElementById('filter-op').value;
-    var val = document.getElementById('filter-val').value;
-    if (!col || !op) return;
-    if (op !== 'empty' && !val) return;
+    /* Column changed — update ops */
+    colSelect.addEventListener('change', updateOps);
 
-    var url = new URL(window.location.href);
-    // Find next filter index
-    var idx = 0;
-    url.searchParams.forEach(function(v, k) {
-        if (k.startsWith('flt')) {
-            var m = k.match(/^flt(\d+)/);
+    /* Operation changed — toggle value visibility */
+    opSelect.addEventListener('change', function() {
+        if (opSelect.value === 'empty') {
+            valInput.style.display = 'none';
+        } else {
+            valInput.style.display = '';
+        }
+    });
+
+    /* Apply filter */
+    function applyFilter() {
+        var col = colSelect.value;
+        var op  = opSelect.value;
+        var val = valInput.value;
+        if (!col || !op) return;
+        if (op !== 'empty' && !val) return;
+
+        var url = new URL(window.location.href);
+        /* Find next filter index */
+        var idx = 0;
+        for (var pair of url.searchParams.entries()) {
+            var m = pair[0].match(/^flt(\d+)/);
             if (m) idx = Math.max(idx, parseInt(m[1]) + 1);
         }
-    });
-    url.searchParams.set('flt' + idx + '_' + col + '_' + op, val);
-    url.searchParams.set('page', '1');
-    window.location.href = url.toString();
-}
+        url.searchParams.set('flt' + idx + '_' + col + '_' + op, val);
+        url.searchParams.set('page', '1');
+        window.location.href = url.toString();
+    }
 
-function removeFilter(removeIdx) {
-    var url = new URL(window.location.href);
-    // Collect all existing filters
-    var filters = [];
-    url.searchParams.forEach(function(v, k) {
-        if (k.startsWith('flt')) filters.push([k, v]);
+    document.getElementById('btn-apply-filter').addEventListener('click', applyFilter);
+    valInput.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); applyFilter(); }
     });
-    // Remove all flt params
-    filters.forEach(function(f) { url.searchParams.delete(f[0]); });
-    // Re-add all except the removed one, re-indexing
-    var newIdx = 0;
-    filters.sort(function(a, b) {
-        var ai = parseInt(a[0].match(/^flt(\d+)/)[1]);
-        var bi = parseInt(b[0].match(/^flt(\d+)/)[1]);
-        return ai - bi;
-    });
-    filters.forEach(function(f, i) {
-        if (i !== removeIdx) {
-            var suffix = f[0].replace(/^flt\d+/, '');
-            url.searchParams.set('flt' + newIdx + suffix, f[1]);
-            newIdx++;
-        }
-    });
-    url.searchParams.set('page', '1');
-    window.location.href = url.toString();
-}
 
-function cancelFilter() {
-    document.getElementById('new-filter-row').classList.add('d-none');
-}
+    /* Cancel */
+    document.getElementById('btn-cancel-filter').addEventListener('click', function() {
+        filterRow.style.display = 'none';
+    });
+
+    /* Remove a single filter badge */
+    document.querySelectorAll('.remove-filter').forEach(function(el) {
+        el.addEventListener('click', function(e) {
+            e.preventDefault();
+            var removeIdx = parseInt(this.getAttribute('data-idx'));
+            var url = new URL(window.location.href);
+            var filters = [];
+            for (var pair of url.searchParams.entries()) {
+                if (pair[0].startsWith('flt')) filters.push([pair[0], pair[1]]);
+            }
+            filters.forEach(function(f) { url.searchParams.delete(f[0]); });
+            filters.sort(function(a, b) {
+                return parseInt(a[0].match(/^flt(\d+)/)[1]) - parseInt(b[0].match(/^flt(\d+)/)[1]);
+            });
+            var ni = 0;
+            filters.forEach(function(f, i) {
+                if (i !== removeIdx) {
+                    var suffix = f[0].replace(/^flt\d+/, '');
+                    url.searchParams.set('flt' + ni + suffix, f[1]);
+                    ni++;
+                }
+            });
+            url.searchParams.set('page', '1');
+            window.location.href = url.toString();
+        });
+    });
+})();
 </script>
 {% endif %}
 {% endblock %}
