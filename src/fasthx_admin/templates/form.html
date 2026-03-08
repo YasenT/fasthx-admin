@@ -29,10 +29,12 @@
                          class="accordion-collapse collapse {% if loop.first %}show{% endif %}"
                          data-bs-parent="#formAccordion">
                         <div class="accordion-body">
+                            {% for field_key in section_fields %}
                             {% for field in form_fields %}
-                            {% if field.key in section_fields %}
+                            {% if field.key == field_key %}
                             {% include "partials/_form_field.html" %}
                             {% endif %}
+                            {% endfor %}
                             {% endfor %}
                         </div>
                     </div>

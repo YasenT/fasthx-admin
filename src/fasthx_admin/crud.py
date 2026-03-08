@@ -260,10 +260,12 @@ class CRUDView:
                     "sortable": self.column_sortable is None or col_obj.key in (self.column_sortable or []),
                 })
 
-        # Build form field metadata
+        # Build form field metadata (ordered by form_columns)
         self.form_fields = []
-        for col_obj in mapper.columns:
-            if col_obj.key in self.form_columns:
+        col_map = {col_obj.key: col_obj for col_obj in mapper.columns}
+        for col_key in self.form_columns:
+            col_obj = col_map.get(col_key)
+            if col_obj:
                 col_type = type(col_obj.type).__name__
                 html_type = COLUMN_TYPE_MAP.get(col_type, "text")
 
