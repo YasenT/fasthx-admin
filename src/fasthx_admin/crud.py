@@ -43,6 +43,48 @@ COLUMN_TYPE_MAP = {
     "Enum": "select",
 }
 
+# Maps SQLAlchemy column type names to available filter operations.
+# Each operation is (key, label) where key is used in the URL.
+FILTER_OPS_STRING = [
+    ("contains", "contains"),
+    ("not_contains", "not contains"),
+    ("equals", "equals"),
+    ("not_equal", "not equal"),
+    ("empty", "empty"),
+    ("in_list", "in list"),
+]
+FILTER_OPS_NUMERIC = [
+    ("equals", "equals"),
+    ("not_equal", "not equal"),
+    ("greater", "greater than"),
+    ("smaller", "smaller than"),
+    ("empty", "empty"),
+]
+FILTER_OPS_BOOLEAN = [
+    ("equals", "equals"),
+    ("not_equal", "not equal"),
+]
+FILTER_OPS_DATE = [
+    ("equals", "equals"),
+    ("not_equal", "not equal"),
+    ("greater", "greater than"),
+    ("smaller", "smaller than"),
+    ("empty", "empty"),
+]
+
+# Map SQLAlchemy type names to filter operation lists
+FILTER_TYPE_OPS = {
+    "String": FILTER_OPS_STRING,
+    "VARCHAR": FILTER_OPS_STRING,
+    "Text": FILTER_OPS_STRING,
+    "Integer": FILTER_OPS_NUMERIC,
+    "Float": FILTER_OPS_NUMERIC,
+    "Boolean": FILTER_OPS_BOOLEAN,
+    "DateTime": FILTER_OPS_DATE,
+    "Date": FILTER_OPS_DATE,
+    "Enum": FILTER_OPS_STRING,
+}
+
 # Global registry of model classes by table name, populated during CRUDView init
 _model_registry: Dict[str, Any] = {}
 
@@ -111,6 +153,68 @@ def toast_response(
             samesite="lax",
         )
     return response
+
+
+def _parse_filter_params(request: Request, column_filters, column_labels=None) -> list:
+    """Parse filter parameters from query string.
+
+    URL format: ``flt{index}_{column}_{operation}={value}``
+
+    Returns a list of ``(column, operation, value, label)`` tuples where
+    *label* is a human-readable column name derived from the key.
+    """
+    if not column_filters:
+        return []
+    allowed = set(column_filters)
+    _labels = column_labels or {}
+    indexed: list[tuple] = []
+    for key, value in request.query_params.items():
+        if not key.startswith("flt"):
+            continue
+        rest = key[3:]
+        parts = rest.split("_", 1)
+        if len(parts) < 2:
+            continue
+        if parts[0].isdigit():
+            idx = int(parts[0])
+            col_op = parts[1]
+        else:
+            idx = 0
+            col_op = rest.lstrip("_")
+        matched_col = None
+        matched_op = None
+        for col_name in sorted(allowed, key=len, reverse=True):
+            if col_op.startswith(col_name + "_"):
+                matched_col = col_name
+                matched_op = col_op[len(col_name) + 1:]
+                break
+        if matched_col and matched_op:
+            label = _labels.get(matched_col, matched_col.replace("_", " ").title())
+            indexed.append((idx, matched_col, matched_op, value, label))
+    indexed.sort(key=lambda x: x[0])
+    return [(col, op, val, lbl) for _, col, op, val, lbl in indexed]
+
+
+def _build_filter_defs(view, model) -> list:
+    """Build filter definitions for the template.
+
+    Returns a list of dicts:
+    ``[{"col": "product", "label": "Product", "ops": [("contains", "contains"), ...]}]``
+    """
+    if not view.column_filters:
+        return []
+    mapper = inspect(model)
+    col_map = {c.key: c for c in mapper.columns}
+    defs = []
+    for col_key in view.column_filters:
+        col_obj = col_map.get(col_key)
+        if col_obj is None:
+            continue
+        col_type = type(col_obj.type).__name__
+        ops = FILTER_TYPE_OPS.get(col_type, FILTER_OPS_STRING)
+        label = view.column_labels.get(col_key, col_key.replace("_", " ").title()) if view.column_labels else col_key.replace("_", " ").title()
+        defs.append({"col": col_key, "label": label, "ops": ops})
+    return defs
 
 
 class CRUDView:
@@ -372,15 +476,37 @@ class CRUDView:
             return [(getattr(item, 'id', str(item)), str(item)) for item in items]
         return []
 
-    def _build_query(self, db: Session, search: str = "", sort: str = "", order: str = "asc", filters: dict | None = None):
-        """Build a query with search, sorting, and column filters."""
+    def _build_query(self, db: Session, search: str = "", sort: str = "", order: str = "asc", filters: list | None = None):
+        """Build a query with search, sorting, and column filters.
+
+        ``filters`` is a list of (col_key, operation, value) tuples.
+        """
         query = db.query(self.model)
 
         # Apply column filters
         if filters:
-            for col_key, value in filters.items():
-                if value and hasattr(self.model, col_key):
-                    query = query.filter(getattr(self.model, col_key) == value)
+            for col_key, op, value, *_ in filters:
+                col = getattr(self.model, col_key, None)
+                if col is None:
+                    continue
+                if op == "contains":
+                    query = query.filter(cast(col, String).ilike(f"%{value}%"))
+                elif op == "not_contains":
+                    query = query.filter(~cast(col, String).ilike(f"%{value}%"))
+                elif op == "equals":
+                    query = query.filter(col == value)
+                elif op == "not_equal":
+                    query = query.filter(col != value)
+                elif op == "empty":
+                    query = query.filter((col == None) | (cast(col, String) == ""))  # noqa: E711
+                elif op == "greater":
+                    query = query.filter(col > value)
+                elif op == "smaller":
+                    query = query.filter(col < value)
+                elif op == "in_list":
+                    vals = [v.strip() for v in value.split(",") if v.strip()]
+                    if vals:
+                        query = query.filter(col.in_(vals))
 
         if search and self.column_searchable:
             mapper = inspect(self.model)
@@ -503,13 +629,8 @@ class CRUDView:
             order: str = "asc",
             db: Session = Depends(get_db),
         ):
-            # Parse active filters from query params
-            active_filters = {}
-            if view.column_filters:
-                for filt_key in view.column_filters:
-                    val = request.query_params.get(f"flt_{filt_key}", "")
-                    if val:
-                        active_filters[filt_key] = val
+            # Parse active filters from query params (flt{idx}_{col}_{op}=value)
+            active_filters = _parse_filter_params(request, view.column_filters, view.column_labels)
 
             query = view._build_query(db, search=q, sort=sort, order=order, filters=active_filters)
             total = query.count()
@@ -534,21 +655,8 @@ class CRUDView:
                     }
                 rows.append(row)
 
-            # Build filter options (distinct values per filter column)
-            filter_options = {}
-            if view.column_filters:
-                for filt_key in view.column_filters:
-                    col = getattr(model, filt_key, None)
-                    if col is not None:
-                        distinct_vals = [
-                            r[0] for r in db.query(col).distinct().order_by(col).all()
-                            if r[0] is not None
-                        ]
-                        label = view.column_labels.get(filt_key, filt_key.replace("_", " ").title()) if view.column_labels else filt_key.replace("_", " ").title()
-                        filter_options[filt_key] = {
-                            "label": label,
-                            "choices": [str(v.value) if hasattr(v, "value") else str(v) for v in distinct_vals],
-                        }
+            # Build filter definitions for the template
+            filter_defs = _build_filter_defs(view, model)
 
             context = {
                 "request": request,
@@ -562,7 +670,7 @@ class CRUDView:
                 "sort": sort,
                 "order": order,
                 "row_actions": view.row_actions,
-                "filter_options": filter_options,
+                "filter_defs": filter_defs,
                 "active_filters": active_filters,
             }
 
@@ -584,12 +692,7 @@ class CRUDView:
                 if fmt not in view.export_types:
                     return HTMLResponse("Export format not supported", status_code=400)
 
-                active_filters = {}
-                if view.column_filters:
-                    for filt_key in view.column_filters:
-                        val = request.query_params.get(f"flt_{filt_key}", "")
-                        if val:
-                            active_filters[filt_key] = val
+                active_filters = _parse_filter_params(request, view.column_filters, view.column_labels)
 
                 query = view._build_query(db, search=q, sort=sort, order=order, filters=active_filters)
                 items = query.all()
