@@ -73,31 +73,23 @@
 </div>
 {% endif %}
 
-{# New filter row — all options rendered server-side #}
+{# New filter row #}
 {% if filter_defs %}
 <div id="new-filter-row" style="display:none;" class="mb-3">
     <div class="d-flex gap-2 align-items-center flex-wrap">
-        {# Column select #}
         <select id="filter-col" class="form-select form-select-sm" style="width:auto; min-width:140px;">
             <option value="">-- Column --</option>
             {% for fd in filter_defs %}
-            <option value="{{ fd.col }}">{{ fd.label }}</option>
+            <option value="{{ fd.col }}"
+                    data-ops="{% for op_key, op_label in fd.ops %}{{ op_key }}:{{ op_label }}{% if not loop.last %}|{% endif %}{% endfor %}">
+                {{ fd.label }}
+            </option>
             {% endfor %}
         </select>
-
-        {# Operation select — one <optgroup> per column, JS shows/hides #}
         <select id="filter-op" class="form-select form-select-sm" style="width:auto; min-width:160px;">
             <option value="">-- Operation --</option>
-            {% for fd in filter_defs %}
-            {% for op_key, op_label in fd.ops %}
-            <option value="{{ op_key }}" data-col="{{ fd.col }}" style="display:none;">{{ op_label }}</option>
-            {% endfor %}
-            {% endfor %}
         </select>
-
-        {# Value input #}
         <input id="filter-val" type="text" class="form-control form-control-sm" style="width:200px;" placeholder="Value...">
-
         <button id="btn-apply-filter" class="btn btn-primary btn-sm">Apply</button>
         <button id="btn-cancel-filter" class="btn btn-outline-secondary btn-sm"><i class="bi bi-x-lg"></i></button>
     </div>
@@ -162,119 +154,145 @@
 {% if filter_defs %}
 <script>
 (function() {
-    var colSelect = document.getElementById('filter-col');
-    var opSelect  = document.getElementById('filter-op');
-    var valInput  = document.getElementById('filter-val');
-    var filterRow = document.getElementById('new-filter-row');
+    var colSelect  = document.getElementById('filter-col');
+    var opSelect   = document.getElementById('filter-op');
+    var valInput   = document.getElementById('filter-val');
+    var filterRow  = document.getElementById('new-filter-row');
+    var btnAdd     = document.getElementById('btn-add-filter');
+    var btnApply   = document.getElementById('btn-apply-filter');
+    var btnCancel  = document.getElementById('btn-cancel-filter');
 
-    /* Show/hide operation options based on selected column */
-    function updateOps() {
-        var col = colSelect.value;
-        var ops = opSelect.options;
-        var firstVisible = null;
-        for (var i = 1; i < ops.length; i++) {
-            var show = (ops[i].getAttribute('data-col') === col);
-            ops[i].style.display = show ? '' : 'none';
-            ops[i].disabled = !show;
-            if (show && !firstVisible) firstVisible = ops[i];
-        }
-        /* Auto-select first visible operation */
-        if (firstVisible) {
-            opSelect.value = firstVisible.value;
+    /* When column changes, rebuild the operation dropdown from data-ops attribute */
+    colSelect.addEventListener('change', function() {
+        /* Clear existing options */
+        opSelect.length = 0;
+
+        var selected = colSelect.options[colSelect.selectedIndex];
+        var opsStr = selected ? selected.getAttribute('data-ops') : '';
+
+        if (opsStr) {
+            var pairs = opsStr.split('|');
+            for (var i = 0; i < pairs.length; i++) {
+                var parts = pairs[i].split(':');
+                var opt = document.createElement('option');
+                opt.value = parts[0];
+                opt.text = parts[1];
+                opSelect.appendChild(opt);
+            }
         } else {
-            opSelect.value = '';
+            var placeholder = document.createElement('option');
+            placeholder.value = '';
+            placeholder.text = '-- Operation --';
+            opSelect.appendChild(placeholder);
         }
-        /* Hide value input for "empty" operation */
-        if (opSelect.value === 'empty') {
-            valInput.style.display = 'none';
-        } else {
-            valInput.style.display = '';
-        }
-    }
+
+        /* Show/hide value for "empty" op */
+        valInput.style.display = (opSelect.value === 'empty') ? 'none' : '';
+    });
+
+    /* When operation changes, toggle value field visibility */
+    opSelect.addEventListener('change', function() {
+        valInput.style.display = (opSelect.value === 'empty') ? 'none' : '';
+    });
 
     /* Show the filter row */
-    document.getElementById('btn-add-filter').addEventListener('click', function() {
+    btnAdd.addEventListener('click', function() {
         filterRow.style.display = '';
-        colSelect.value = '';
-        opSelect.value = '';
+        colSelect.selectedIndex = 0;
+        opSelect.length = 0;
+        var placeholder = document.createElement('option');
+        placeholder.value = '';
+        placeholder.text = '-- Operation --';
+        opSelect.appendChild(placeholder);
         valInput.value = '';
         valInput.style.display = '';
-        /* Hide all ops until column is chosen */
-        for (var i = 1; i < opSelect.options.length; i++) {
-            opSelect.options[i].style.display = 'none';
-            opSelect.options[i].disabled = true;
-        }
         colSelect.focus();
     });
 
-    /* Column changed — update ops */
-    colSelect.addEventListener('change', updateOps);
-
-    /* Operation changed — toggle value visibility */
-    opSelect.addEventListener('change', function() {
-        if (opSelect.value === 'empty') {
-            valInput.style.display = 'none';
-        } else {
-            valInput.style.display = '';
-        }
-    });
-
-    /* Apply filter */
-    function applyFilter() {
+    /* Apply: build URL and navigate */
+    btnApply.addEventListener('click', function() {
         var col = colSelect.value;
         var op  = opSelect.value;
         var val = valInput.value;
-        if (!col || !op) return;
-        if (op !== 'empty' && !val) return;
+
+        if (!col) { colSelect.focus(); return; }
+        if (!op) { opSelect.focus(); return; }
+        if (op !== 'empty' && !val) { valInput.focus(); return; }
 
         var url = new URL(window.location.href);
+
         /* Find next filter index */
         var idx = 0;
-        for (var pair of url.searchParams.entries()) {
-            var m = pair[0].match(/^flt(\d+)/);
-            if (m) idx = Math.max(idx, parseInt(m[1]) + 1);
+        var keys = [];
+        /* Collect all param keys (avoid iterator issues) */
+        url.searchParams.forEach(function(v, k) { keys.push(k); });
+        for (var i = 0; i < keys.length; i++) {
+            var m = keys[i].match(/^flt(\d+)/);
+            if (m) {
+                var n = parseInt(m[1]) + 1;
+                if (n > idx) idx = n;
+            }
         }
+
         url.searchParams.set('flt' + idx + '_' + col + '_' + op, val);
         url.searchParams.set('page', '1');
         window.location.href = url.toString();
-    }
+    });
 
-    document.getElementById('btn-apply-filter').addEventListener('click', applyFilter);
+    /* Enter key in value field triggers apply */
     valInput.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter') { e.preventDefault(); applyFilter(); }
+        if (e.key === 'Enter') { e.preventDefault(); btnApply.click(); }
     });
 
     /* Cancel */
-    document.getElementById('btn-cancel-filter').addEventListener('click', function() {
+    btnCancel.addEventListener('click', function() {
         filterRow.style.display = 'none';
     });
 
     /* Remove a single filter badge */
-    document.querySelectorAll('.remove-filter').forEach(function(el) {
-        el.addEventListener('click', function(e) {
+    var removeBtns = document.querySelectorAll('.remove-filter');
+    for (var r = 0; r < removeBtns.length; r++) {
+        removeBtns[r].addEventListener('click', function(e) {
             e.preventDefault();
             var removeIdx = parseInt(this.getAttribute('data-idx'));
             var url = new URL(window.location.href);
+
+            /* Collect existing flt params */
             var filters = [];
-            for (var pair of url.searchParams.entries()) {
-                if (pair[0].startsWith('flt')) filters.push([pair[0], pair[1]]);
+            var allKeys = [];
+            url.searchParams.forEach(function(v, k) { allKeys.push([k, v]); });
+            for (var i = 0; i < allKeys.length; i++) {
+                if (allKeys[i][0].indexOf('flt') === 0) {
+                    filters.push(allKeys[i]);
+                }
             }
-            filters.forEach(function(f) { url.searchParams.delete(f[0]); });
+
+            /* Delete all flt params */
+            for (var i = 0; i < filters.length; i++) {
+                url.searchParams.delete(filters[i][0]);
+            }
+
+            /* Sort by index */
             filters.sort(function(a, b) {
-                return parseInt(a[0].match(/^flt(\d+)/)[1]) - parseInt(b[0].match(/^flt(\d+)/)[1]);
+                var ai = parseInt(a[0].match(/^flt(\d+)/)[1]);
+                var bi = parseInt(b[0].match(/^flt(\d+)/)[1]);
+                return ai - bi;
             });
+
+            /* Re-add all except removed, with new indexes */
             var ni = 0;
-            filters.forEach(function(f, i) {
+            for (var i = 0; i < filters.length; i++) {
                 if (i !== removeIdx) {
-                    var suffix = f[0].replace(/^flt\d+/, '');
-                    url.searchParams.set('flt' + ni + suffix, f[1]);
+                    var suffix = filters[i][0].replace(/^flt\d+/, '');
+                    url.searchParams.set('flt' + ni + suffix, filters[i][1]);
                     ni++;
                 }
-            });
+            }
+
             url.searchParams.set('page', '1');
             window.location.href = url.toString();
         });
-    });
+    }
 })();
 </script>
 {% endif %}
