@@ -46,16 +46,9 @@
         </div>
         {% endif %}
         {% if filter_defs %}
-        <div class="btn-group">
-            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
-                <i class="bi bi-funnel"></i> Add Filter
-            </button>
-            <ul class="dropdown-menu">
-                {% for fd in filter_defs %}
-                <li><a class="dropdown-item" href="#" onclick="addFilter('{{ fd.col }}'); return false;">{{ fd.label }}</a></li>
-                {% endfor %}
-            </ul>
-        </div>
+        <button class="btn btn-outline-secondary btn-sm" type="button" onclick="addFilter()">
+            <i class="bi bi-funnel"></i> Add Filter
+        </button>
         {% endif %}
         {% if view.can_create %}
         <a href="/{{ view.name }}/create" class="btn btn-primary btn-sm">
@@ -160,18 +153,14 @@ var filterDefs = {{ filter_defs|tojson }};
 var filterDefMap = {};
 filterDefs.forEach(function(fd) { filterDefMap[fd.col] = fd; });
 
-function addFilter(col) {
+function addFilter() {
     var row = document.getElementById('new-filter-row');
     row.classList.remove('d-none');
     var colSelect = document.getElementById('filter-col');
-    if (col) {
-        colSelect.value = col;
-    } else if (!colSelect.value && filterDefs.length > 0) {
-        colSelect.value = filterDefs[0].col;
-    }
-    onFilterColChange();
+    colSelect.value = '';
+    document.getElementById('filter-op').innerHTML = '<option value="">Operation...</option>';
     document.getElementById('filter-val').value = '';
-    document.getElementById('filter-val').focus();
+    colSelect.focus();
 }
 
 function onFilterColChange() {
