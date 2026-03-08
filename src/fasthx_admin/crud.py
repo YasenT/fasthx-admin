@@ -226,6 +226,44 @@ def _build_filter_defs(view, model, db: Session = None) -> list:
     return defs
 
 
+def _safe_build_query(view, db, q, sort, order, active_filters):
+    """Call ``view._build_query`` with filters, falling back if the subclass
+    overrides ``_build_query`` without a *filters* parameter."""
+    try:
+        return view._build_query(db, search=q, sort=sort, order=order, filters=active_filters)
+    except TypeError:
+        # Subclass override doesn't accept 'filters' — call without it
+        query = view._build_query(db, search=q, sort=sort, order=order)
+        # Apply filters manually on the returned query
+        if active_filters:
+            for col_key, op, value, *_ in active_filters:
+                col = getattr(view.model, col_key, None)
+                if col is None:
+                    continue
+                mapper = inspect(view.model)
+                ctype = {c.key: type(c.type).__name__ for c in mapper.columns}.get(col_key, "")
+                if ctype in ("Integer",) and op != "empty":
+                    try:
+                        value = int(value)
+                    except (ValueError, TypeError):
+                        continue
+                if op == "equals":
+                    query = query.filter(col == value)
+                elif op == "not_equal":
+                    query = query.filter(col != value)
+                elif op == "contains":
+                    query = query.filter(cast(col, String).ilike(f"%{value}%"))
+                elif op == "not_contains":
+                    query = query.filter(~cast(col, String).ilike(f"%{value}%"))
+                elif op == "empty":
+                    query = query.filter((col == None) | (cast(col, String) == ""))  # noqa: E711
+                elif op == "greater":
+                    query = query.filter(col > value)
+                elif op == "smaller":
+                    query = query.filter(col < value)
+        return query
+
+
 class CRUDView:
     """
     Given a SQLAlchemy model, generates list/detail/create/edit/delete routes.
@@ -655,7 +693,7 @@ class CRUDView:
             # Parse active filters from query params (flt{idx}_{col}_{op}=value)
             active_filters = _parse_filter_params(request, view.column_filters, view.column_labels)
 
-            query = view._build_query(db, search=q, sort=sort, order=order, filters=active_filters)
+            query = _safe_build_query(view, db, q, sort, order, active_filters)
             total = query.count()
             total_pages = max(1, math.ceil(total / view.page_size))
             page = max(1, min(page, total_pages))
@@ -717,7 +755,7 @@ class CRUDView:
 
                 active_filters = _parse_filter_params(request, view.column_filters, view.column_labels)
 
-                query = view._build_query(db, search=q, sort=sort, order=order, filters=active_filters)
+                query = _safe_build_query(view, db, q, sort, order, active_filters)
                 items = query.all()
 
                 # Get column keys and labels

@@ -52,7 +52,9 @@
             <option value="{{ fd.col }}"
                     data-ops="{% for op_key, op_label in fd.ops %}{{ op_key }}:{{ op_label }}{% if not loop.last %}|{% endif %}{% endfor %}"
                     data-label="{{ fd.label }}"
-                    {% if fd.fk_choices is defined and fd.fk_choices %}data-fk="1" data-fk-choices="{% for pk, display in fd.fk_choices %}{{ pk }}:{{ display }}{% if not loop.last %}|{% endif %}{% endfor %}"{% endif %}>{{ fd.label }}</option>
+                    {% if fd.fk_choices is defined and fd.fk_choices %}data-fk="1" data-fk-choices="{% for pk, display in fd.fk_choices %}{{ pk }}::{{ display }}{% if not loop.last %}||{% endif %}{% endfor %}"{% endif %}>
+                {{ fd.label }}
+            </option>
             {% endfor %}
         </select>
         {% endif %}
@@ -85,10 +87,8 @@
     <div class="d-flex gap-2 align-items-center flex-wrap">
         <span id="filter-col-label" class="badge bg-secondary py-2 px-3" style="font-size:0.85em;"></span>
         <input type="hidden" id="filter-col-value">
-        <select id="filter-op" class="form-select form-select-sm no-tomselect" style="width:auto; min-width:160px;">
-            <option value="">-- Operation --</option>
-        </select>
-        <input id="filter-val" type="text" class="form-control form-control-sm" style="width:200px;" placeholder="Value...">
+        <select id="filter-op" class="form-select form-select-sm no-tomselect" style="width:auto; min-width:160px;"></select>
+        <input id="filter-val-text" type="text" class="form-control form-control-sm" style="width:200px;" placeholder="Value...">
         <select id="filter-val-select" class="form-select form-select-sm no-tomselect" style="width:auto; min-width:200px; display:none;"></select>
         <button id="btn-apply-filter" class="btn btn-primary btn-sm">Apply</button>
         <button id="btn-cancel-filter" class="btn btn-outline-secondary btn-sm"><i class="bi bi-x-lg"></i></button>
@@ -154,104 +154,90 @@
 {% if filter_defs %}
 <script>
 (function() {
-    var addSelect   = document.getElementById('add-filter-select');
-    var filterRow   = document.getElementById('new-filter-row');
-    var colLabel    = document.getElementById('filter-col-label');
-    var colValue    = document.getElementById('filter-col-value');
-    var opSelect    = document.getElementById('filter-op');
-    var valInput    = document.getElementById('filter-val');
-    var valSelect   = document.getElementById('filter-val-select');
-    var btnApply    = document.getElementById('btn-apply-filter');
-    var btnCancel   = document.getElementById('btn-cancel-filter');
-    var isFkColumn  = false;
+    var addSelect  = document.getElementById('add-filter-select');
+    var filterRow  = document.getElementById('new-filter-row');
+    var colLabel   = document.getElementById('filter-col-label');
+    var colValue   = document.getElementById('filter-col-value');
+    var opSelect   = document.getElementById('filter-op');
+    var valText    = document.getElementById('filter-val-text');
+    var valSelect  = document.getElementById('filter-val-select');
+    var btnApply   = document.getElementById('btn-apply-filter');
+    var btnCancel  = document.getElementById('btn-cancel-filter');
+    var isFk       = false;
 
-    /* Step 1: User picks a column from "Add Filter" dropdown */
+    /* User picks a column from "Add Filter" */
     addSelect.addEventListener('change', function() {
-        var selected = addSelect.options[addSelect.selectedIndex];
+        var opt = addSelect.options[addSelect.selectedIndex];
         var col = addSelect.value;
         if (!col) return;
 
-        /* Show the filter row with the chosen column */
-        colLabel.textContent = selected.getAttribute('data-label') || col;
+        colLabel.textContent = opt.getAttribute('data-label') || col;
         colValue.value = col;
         filterRow.style.display = '';
 
-        /* Populate operation dropdown from data-ops */
-        var opsStr = selected.getAttribute('data-ops') || '';
+        /* Build operation options */
         opSelect.innerHTML = '';
-        if (opsStr) {
-            var pairs = opsStr.split('|');
-            for (var i = 0; i < pairs.length; i++) {
-                var parts = pairs[i].split(':');
-                var opt = document.createElement('option');
-                opt.value = parts[0];
-                opt.text = parts.slice(1).join(':');
-                opSelect.add(opt);
-            }
+        var opsStr = opt.getAttribute('data-ops') || '';
+        var pairs = opsStr.split('|');
+        for (var i = 0; i < pairs.length; i++) {
+            var kv = pairs[i].split(':');
+            var o = document.createElement('option');
+            o.value = kv[0];
+            o.text = kv.slice(1).join(':');
+            opSelect.appendChild(o);
         }
 
-        /* Check if this is a FK column with choices */
-        isFkColumn = (selected.getAttribute('data-fk') === '1');
-        if (isFkColumn) {
-            /* Show select, hide text input */
-            valInput.style.display = 'none';
+        /* FK column? Show select instead of text input */
+        isFk = (opt.getAttribute('data-fk') === '1');
+        if (isFk) {
+            valText.style.display = 'none';
             valSelect.style.display = '';
             valSelect.innerHTML = '';
-            var fkStr = selected.getAttribute('data-fk-choices') || '';
-            if (fkStr) {
-                var fkPairs = fkStr.split('|');
-                for (var j = 0; j < fkPairs.length; j++) {
-                    var fkParts = fkPairs[j].split(':');
-                    var fkOpt = document.createElement('option');
-                    fkOpt.value = fkParts[0];
-                    fkOpt.text = fkParts.slice(1).join(':');
-                    valSelect.add(fkOpt);
-                }
+            var fkStr = opt.getAttribute('data-fk-choices') || '';
+            var fkPairs = fkStr.split('||');
+            for (var j = 0; j < fkPairs.length; j++) {
+                if (!fkPairs[j]) continue;
+                var fkKv = fkPairs[j].split('::');
+                var fo = document.createElement('option');
+                fo.value = fkKv[0];
+                fo.text = fkKv.slice(1).join('::');
+                valSelect.appendChild(fo);
             }
         } else {
-            /* Show text input, hide select */
-            valInput.style.display = '';
+            valText.style.display = '';
             valSelect.style.display = 'none';
-            valInput.value = '';
+            valText.value = '';
         }
 
-        if (opSelect.value === 'empty') {
-            valInput.style.display = 'none';
-            valSelect.style.display = 'none';
-        }
-
-        /* Reset the Add Filter dropdown back to placeholder */
+        toggleValueVisibility();
         addSelect.selectedIndex = 0;
-
         opSelect.focus();
     });
 
-    /* When operation changes, toggle value field */
-    opSelect.addEventListener('change', function() {
+    function toggleValueVisibility() {
         if (opSelect.value === 'empty') {
-            valInput.style.display = 'none';
+            valText.style.display = 'none';
             valSelect.style.display = 'none';
-        } else if (isFkColumn) {
-            valInput.style.display = 'none';
+        } else if (isFk) {
+            valText.style.display = 'none';
             valSelect.style.display = '';
         } else {
-            valInput.style.display = '';
+            valText.style.display = '';
             valSelect.style.display = 'none';
         }
-    });
+    }
 
-    /* Apply: build URL with new filter param and navigate */
+    opSelect.addEventListener('change', toggleValueVisibility);
+
+    /* Apply */
     btnApply.addEventListener('click', function() {
         var col = colValue.value;
         var op  = opSelect.value;
-        var val = isFkColumn ? valSelect.value : valInput.value;
-
+        var val = isFk ? valSelect.value : valText.value;
         if (!col || !op) return;
-        if (op !== 'empty' && !val) { (isFkColumn ? valSelect : valInput).focus(); return; }
+        if (op !== 'empty' && !val) return;
 
         var url = new URL(window.location.href);
-
-        /* Find next filter index */
         var idx = 0;
         var keys = [];
         url.searchParams.forEach(function(v, k) { keys.push(k); });
@@ -262,41 +248,33 @@
                 if (n > idx) idx = n;
             }
         }
-
         url.searchParams.set('flt' + idx + '_' + col + '_' + op, val);
         url.searchParams.set('page', '1');
         window.location.href = url.toString();
     });
 
-    /* Enter key in value field triggers apply */
-    valInput.addEventListener('keydown', function(e) {
+    valText.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') { e.preventDefault(); btnApply.click(); }
     });
 
-    /* Cancel: hide the filter row */
     btnCancel.addEventListener('click', function() {
         filterRow.style.display = 'none';
     });
 
-    /* Remove a single filter badge */
+    /* Remove filter badge */
     var removeBtns = document.querySelectorAll('.remove-filter');
     for (var r = 0; r < removeBtns.length; r++) {
         removeBtns[r].addEventListener('click', function(e) {
             e.preventDefault();
             var removeIdx = parseInt(this.getAttribute('data-idx'));
             var url = new URL(window.location.href);
-
             var filters = [];
             var allKeys = [];
             url.searchParams.forEach(function(v, k) { allKeys.push([k, v]); });
             for (var i = 0; i < allKeys.length; i++) {
-                if (allKeys[i][0].indexOf('flt') === 0) {
-                    filters.push(allKeys[i]);
-                }
+                if (allKeys[i][0].indexOf('flt') === 0) filters.push(allKeys[i]);
             }
-            for (var i = 0; i < filters.length; i++) {
-                url.searchParams.delete(filters[i][0]);
-            }
+            for (var i = 0; i < filters.length; i++) url.searchParams.delete(filters[i][0]);
             filters.sort(function(a, b) {
                 return parseInt(a[0].match(/^flt(\d+)/)[1]) - parseInt(b[0].match(/^flt(\d+)/)[1]);
             });
