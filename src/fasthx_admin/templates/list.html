@@ -163,10 +163,13 @@ filterDefs.forEach(function(fd) { filterDefMap[fd.col] = fd; });
 function addFilter(col) {
     var row = document.getElementById('new-filter-row');
     row.classList.remove('d-none');
+    var colSelect = document.getElementById('filter-col');
     if (col) {
-        document.getElementById('filter-col').value = col;
-        onFilterColChange();
+        colSelect.value = col;
+    } else if (!colSelect.value && filterDefs.length > 0) {
+        colSelect.value = filterDefs[0].col;
     }
+    onFilterColChange();
     document.getElementById('filter-val').value = '';
     document.getElementById('filter-val').focus();
 }

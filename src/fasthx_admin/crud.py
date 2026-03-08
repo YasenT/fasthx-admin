@@ -213,7 +213,7 @@ def _build_filter_defs(view, model) -> list:
         col_type = type(col_obj.type).__name__
         ops = FILTER_TYPE_OPS.get(col_type, FILTER_OPS_STRING)
         label = view.column_labels.get(col_key, col_key.replace("_", " ").title()) if view.column_labels else col_key.replace("_", " ").title()
-        defs.append({"col": col_key, "label": label, "ops": ops})
+        defs.append({"col": col_key, "label": label, "ops": [list(o) for o in ops]})
     return defs
 
 
