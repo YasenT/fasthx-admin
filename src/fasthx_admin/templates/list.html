@@ -46,9 +46,15 @@
         </div>
         {% endif %}
         {% if filter_defs %}
-        <button class="btn btn-outline-secondary btn-sm" type="button" id="btn-add-filter">
-            <i class="bi bi-funnel"></i> Add Filter
-        </button>
+        <select id="add-filter-select" class="form-select form-select-sm no-tomselect" style="width:auto; min-width:140px;">
+            <option value="">Add Filter...</option>
+            {% for fd in filter_defs %}
+            <option value="{{ fd.col }}"
+                    data-ops="{% for op_key, op_label in fd.ops %}{{ op_key }}:{{ op_label }}{% if not loop.last %}|{% endif %}{% endfor %}"
+                    data-label="{{ fd.label }}"
+                    {% if fd.fk_choices is defined and fd.fk_choices %}data-fk="1" data-fk-choices="{% for pk, display in fd.fk_choices %}{{ pk }}:{{ display }}{% if not loop.last %}|{% endif %}{% endfor %}"{% endif %}>{{ fd.label }}</option>
+            {% endfor %}
+        </select>
         {% endif %}
         {% if view.can_create %}
         <a href="/{{ view.name }}/create" class="btn btn-primary btn-sm">
@@ -73,23 +79,17 @@
 </div>
 {% endif %}
 
-{# New filter row #}
+{# New filter row — hidden until a column is chosen from Add Filter #}
 {% if filter_defs %}
 <div id="new-filter-row" style="display:none;" class="mb-3">
     <div class="d-flex gap-2 align-items-center flex-wrap">
-        <select id="filter-col" class="form-select form-select-sm" style="width:auto; min-width:140px;">
-            <option value="">-- Column --</option>
-            {% for fd in filter_defs %}
-            <option value="{{ fd.col }}"
-                    data-ops="{% for op_key, op_label in fd.ops %}{{ op_key }}:{{ op_label }}{% if not loop.last %}|{% endif %}{% endfor %}">
-                {{ fd.label }}
-            </option>
-            {% endfor %}
-        </select>
-        <select id="filter-op" class="form-select form-select-sm" style="width:auto; min-width:160px;">
+        <span id="filter-col-label" class="badge bg-secondary py-2 px-3" style="font-size:0.85em;"></span>
+        <input type="hidden" id="filter-col-value">
+        <select id="filter-op" class="form-select form-select-sm no-tomselect" style="width:auto; min-width:160px;">
             <option value="">-- Operation --</option>
         </select>
         <input id="filter-val" type="text" class="form-control form-control-sm" style="width:200px;" placeholder="Value...">
+        <select id="filter-val-select" class="form-select form-select-sm no-tomselect" style="width:auto; min-width:200px; display:none;"></select>
         <button id="btn-apply-filter" class="btn btn-primary btn-sm">Apply</button>
         <button id="btn-cancel-filter" class="btn btn-outline-secondary btn-sm"><i class="bi bi-x-lg"></i></button>
     </div>
@@ -154,77 +154,106 @@
 {% if filter_defs %}
 <script>
 (function() {
-    var colSelect  = document.getElementById('filter-col');
-    var opSelect   = document.getElementById('filter-op');
-    var valInput   = document.getElementById('filter-val');
-    var filterRow  = document.getElementById('new-filter-row');
-    var btnAdd     = document.getElementById('btn-add-filter');
-    var btnApply   = document.getElementById('btn-apply-filter');
-    var btnCancel  = document.getElementById('btn-cancel-filter');
+    var addSelect   = document.getElementById('add-filter-select');
+    var filterRow   = document.getElementById('new-filter-row');
+    var colLabel    = document.getElementById('filter-col-label');
+    var colValue    = document.getElementById('filter-col-value');
+    var opSelect    = document.getElementById('filter-op');
+    var valInput    = document.getElementById('filter-val');
+    var valSelect   = document.getElementById('filter-val-select');
+    var btnApply    = document.getElementById('btn-apply-filter');
+    var btnCancel   = document.getElementById('btn-cancel-filter');
+    var isFkColumn  = false;
 
-    /* When column changes, rebuild the operation dropdown from data-ops attribute */
-    colSelect.addEventListener('change', function() {
-        /* Clear existing options */
-        opSelect.length = 0;
+    /* Step 1: User picks a column from "Add Filter" dropdown */
+    addSelect.addEventListener('change', function() {
+        var selected = addSelect.options[addSelect.selectedIndex];
+        var col = addSelect.value;
+        if (!col) return;
 
-        var selected = colSelect.options[colSelect.selectedIndex];
-        var opsStr = selected ? selected.getAttribute('data-ops') : '';
+        /* Show the filter row with the chosen column */
+        colLabel.textContent = selected.getAttribute('data-label') || col;
+        colValue.value = col;
+        filterRow.style.display = '';
 
+        /* Populate operation dropdown from data-ops */
+        var opsStr = selected.getAttribute('data-ops') || '';
+        opSelect.innerHTML = '';
         if (opsStr) {
             var pairs = opsStr.split('|');
             for (var i = 0; i < pairs.length; i++) {
                 var parts = pairs[i].split(':');
                 var opt = document.createElement('option');
                 opt.value = parts[0];
-                opt.text = parts[1];
-                opSelect.appendChild(opt);
+                opt.text = parts.slice(1).join(':');
+                opSelect.add(opt);
             }
-        } else {
-            var placeholder = document.createElement('option');
-            placeholder.value = '';
-            placeholder.text = '-- Operation --';
-            opSelect.appendChild(placeholder);
         }
 
-        /* Show/hide value for "empty" op */
-        valInput.style.display = (opSelect.value === 'empty') ? 'none' : '';
+        /* Check if this is a FK column with choices */
+        isFkColumn = (selected.getAttribute('data-fk') === '1');
+        if (isFkColumn) {
+            /* Show select, hide text input */
+            valInput.style.display = 'none';
+            valSelect.style.display = '';
+            valSelect.innerHTML = '';
+            var fkStr = selected.getAttribute('data-fk-choices') || '';
+            if (fkStr) {
+                var fkPairs = fkStr.split('|');
+                for (var j = 0; j < fkPairs.length; j++) {
+                    var fkParts = fkPairs[j].split(':');
+                    var fkOpt = document.createElement('option');
+                    fkOpt.value = fkParts[0];
+                    fkOpt.text = fkParts.slice(1).join(':');
+                    valSelect.add(fkOpt);
+                }
+            }
+        } else {
+            /* Show text input, hide select */
+            valInput.style.display = '';
+            valSelect.style.display = 'none';
+            valInput.value = '';
+        }
+
+        if (opSelect.value === 'empty') {
+            valInput.style.display = 'none';
+            valSelect.style.display = 'none';
+        }
+
+        /* Reset the Add Filter dropdown back to placeholder */
+        addSelect.selectedIndex = 0;
+
+        opSelect.focus();
     });
 
-    /* When operation changes, toggle value field visibility */
+    /* When operation changes, toggle value field */
     opSelect.addEventListener('change', function() {
-        valInput.style.display = (opSelect.value === 'empty') ? 'none' : '';
+        if (opSelect.value === 'empty') {
+            valInput.style.display = 'none';
+            valSelect.style.display = 'none';
+        } else if (isFkColumn) {
+            valInput.style.display = 'none';
+            valSelect.style.display = '';
+        } else {
+            valInput.style.display = '';
+            valSelect.style.display = 'none';
+        }
     });
 
-    /* Show the filter row */
-    btnAdd.addEventListener('click', function() {
-        filterRow.style.display = '';
-        colSelect.selectedIndex = 0;
-        opSelect.length = 0;
-        var placeholder = document.createElement('option');
-        placeholder.value = '';
-        placeholder.text = '-- Operation --';
-        opSelect.appendChild(placeholder);
-        valInput.value = '';
-        valInput.style.display = '';
-        colSelect.focus();
-    });
-
-    /* Apply: build URL and navigate */
+    /* Apply: build URL with new filter param and navigate */
     btnApply.addEventListener('click', function() {
-        var col = colSelect.value;
+        var col = colValue.value;
         var op  = opSelect.value;
-        var val = valInput.value;
+        var val = isFkColumn ? valSelect.value : valInput.value;
 
-        if (!col) { colSelect.focus(); return; }
-        if (!op) { opSelect.focus(); return; }
-        if (op !== 'empty' && !val) { valInput.focus(); return; }
+        if (!col || !op) return;
+        if (op !== 'empty' && !val) { (isFkColumn ? valSelect : valInput).focus(); return; }
 
         var url = new URL(window.location.href);
 
         /* Find next filter index */
         var idx = 0;
         var keys = [];
-        /* Collect all param keys (avoid iterator issues) */
         url.searchParams.forEach(function(v, k) { keys.push(k); });
         for (var i = 0; i < keys.length; i++) {
             var m = keys[i].match(/^flt(\d+)/);
@@ -244,7 +273,7 @@
         if (e.key === 'Enter') { e.preventDefault(); btnApply.click(); }
     });
 
-    /* Cancel */
+    /* Cancel: hide the filter row */
     btnCancel.addEventListener('click', function() {
         filterRow.style.display = 'none';
     });
@@ -257,7 +286,6 @@
             var removeIdx = parseInt(this.getAttribute('data-idx'));
             var url = new URL(window.location.href);
 
-            /* Collect existing flt params */
             var filters = [];
             var allKeys = [];
             url.searchParams.forEach(function(v, k) { allKeys.push([k, v]); });
@@ -266,20 +294,12 @@
                     filters.push(allKeys[i]);
                 }
             }
-
-            /* Delete all flt params */
             for (var i = 0; i < filters.length; i++) {
                 url.searchParams.delete(filters[i][0]);
             }
-
-            /* Sort by index */
             filters.sort(function(a, b) {
-                var ai = parseInt(a[0].match(/^flt(\d+)/)[1]);
-                var bi = parseInt(b[0].match(/^flt(\d+)/)[1]);
-                return ai - bi;
+                return parseInt(a[0].match(/^flt(\d+)/)[1]) - parseInt(b[0].match(/^flt(\d+)/)[1]);
             });
-
-            /* Re-add all except removed, with new indexes */
             var ni = 0;
             for (var i = 0; i < filters.length; i++) {
                 if (i !== removeIdx) {
@@ -288,7 +308,6 @@
                     ni++;
                 }
             }
-
             url.searchParams.set('page', '1');
             window.location.href = url.toString();
         });

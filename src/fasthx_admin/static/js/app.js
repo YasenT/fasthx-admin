@@ -168,6 +168,7 @@ function initTomSelect(root) {
     var container = root || document;
     container.querySelectorAll('select.form-select').forEach(function (el) {
         if (el.tomselect) return; // already initialized
+        if (el.classList.contains('no-tomselect')) return; // opt-out
         var opts;
         if (el.hasAttribute('data-ajax-url')) {
             opts = getAjaxTomSelectOptions(el);

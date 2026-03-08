@@ -195,11 +195,12 @@ def _parse_filter_params(request: Request, column_filters, column_labels=None) -
     return [(col, op, val, lbl) for _, col, op, val, lbl in indexed]
 
 
-def _build_filter_defs(view, model) -> list:
+def _build_filter_defs(view, model, db: Session = None) -> list:
     """Build filter definitions for the template.
 
-    Returns a list of dicts:
-    ``[{"col": "product", "label": "Product", "ops": [("contains", "contains"), ...]}]``
+    Returns a list of dicts with keys: col, label, ops, choices (optional).
+    When *choices* is present, the template should render a ``<select>``
+    for the value field instead of a text ``<input>``.
     """
     if not view.column_filters:
         return []
@@ -211,9 +212,17 @@ def _build_filter_defs(view, model) -> list:
         if col_obj is None:
             continue
         col_type = type(col_obj.type).__name__
-        ops = FILTER_TYPE_OPS.get(col_type, FILTER_OPS_STRING)
         label = view.column_labels.get(col_key, col_key.replace("_", " ").title()) if view.column_labels else col_key.replace("_", " ").title()
-        defs.append({"col": col_key, "label": label, "ops": [list(o) for o in ops]})
+
+        # For FK columns: provide choices from the related table and simpler ops
+        if col_key in view.foreign_keys and db is not None:
+            fk_options = view._get_fk_options(db, col_key)
+            choices = [[str(pk), display] for pk, display in fk_options]
+            ops = [["equals", "equals"], ["not_equal", "not equal"], ["empty", "empty"]]
+            defs.append({"col": col_key, "label": label, "ops": ops, "fk_choices": choices})
+        else:
+            ops = FILTER_TYPE_OPS.get(col_type, FILTER_OPS_STRING)
+            defs.append({"col": col_key, "label": label, "ops": [list(o) for o in ops]})
     return defs
 
 
@@ -485,10 +494,24 @@ class CRUDView:
 
         # Apply column filters
         if filters:
+            mapper = inspect(self.model)
+            col_type_map = {c.key: type(c.type).__name__ for c in mapper.columns}
             for col_key, op, value, *_ in filters:
                 col = getattr(self.model, col_key, None)
                 if col is None:
                     continue
+                # Cast value for numeric columns
+                ctype = col_type_map.get(col_key, "")
+                if ctype in ("Integer",) and op != "empty":
+                    try:
+                        value = int(value)
+                    except (ValueError, TypeError):
+                        continue  # skip invalid numeric filter
+                elif ctype in ("Float",) and op != "empty":
+                    try:
+                        value = float(value)
+                    except (ValueError, TypeError):
+                        continue
                 if op == "contains":
                     query = query.filter(cast(col, String).ilike(f"%{value}%"))
                 elif op == "not_contains":
@@ -504,7 +527,7 @@ class CRUDView:
                 elif op == "smaller":
                     query = query.filter(col < value)
                 elif op == "in_list":
-                    vals = [v.strip() for v in value.split(",") if v.strip()]
+                    vals = [v.strip() for v in str(value).split(",") if v.strip()]
                     if vals:
                         query = query.filter(col.in_(vals))
 
@@ -656,7 +679,7 @@ class CRUDView:
                 rows.append(row)
 
             # Build filter definitions for the template
-            filter_defs = _build_filter_defs(view, model)
+            filter_defs = _build_filter_defs(view, model, db)
 
             context = {
                 "request": request,
