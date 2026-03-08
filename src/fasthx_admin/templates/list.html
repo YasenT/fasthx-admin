@@ -4,6 +4,14 @@
 {% block page_title %}{{ view.display_name }}{% endblock %}
 
 {% block content %}
+{# Build filter query string for reuse in links #}
+{% set flt_qs = '' %}
+{% if active_filters %}
+{% for fk, fv in active_filters.items() %}
+{% set flt_qs = flt_qs ~ '&flt_' ~ fk ~ '=' ~ fv %}
+{% endfor %}
+{% endif %}
+
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
         <span class="badge bg-secondary">{{ total }} record{{ 's' if total != 1 }}</span>
@@ -15,7 +23,7 @@
                    placeholder="Search {{ view.display_name }}..."
                    name="q"
                    value="{{ search }}"
-                   hx-get="/{{ view.name }}?partial=1"
+                   hx-get="/{{ view.name }}?partial=1{{ flt_qs }}"
                    hx-trigger="keyup changed delay:300ms"
                    hx-target="#table-body"
                    hx-include="this"
@@ -31,7 +39,7 @@
             </button>
             <ul class="dropdown-menu">
                 {% for fmt in view.export_types %}
-                <li><a class="dropdown-item" href="/{{ view.name }}/export/{{ fmt }}?q={{ search }}&sort={{ sort }}&order={{ order }}">{{ fmt|upper }}</a></li>
+                <li><a class="dropdown-item" href="/{{ view.name }}/export/{{ fmt }}?q={{ search }}&sort={{ sort }}&order={{ order }}{{ flt_qs }}">{{ fmt|upper }}</a></li>
                 {% endfor %}
             </ul>
         </div>
@@ -44,6 +52,26 @@
     </div>
 </div>
 
+{% if filter_options %}
+<div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+    <small class="text-muted"><i class="bi bi-funnel"></i> Filters:</small>
+    {% for filt_key, filt in filter_options.items() %}
+    <select class="form-select form-select-sm" style="width: auto; min-width: 120px;"
+            onchange="applyFilter('{{ filt_key }}', this.value)">
+        <option value="">{{ filt.label }}</option>
+        {% for val in filt.values %}
+        <option value="{{ val }}" {% if active_filters.get(filt_key) == val %}selected{% endif %}>{{ val }}</option>
+        {% endfor %}
+    </select>
+    {% endfor %}
+    {% if active_filters %}
+    <a href="/{{ view.name }}?q={{ search }}&sort={{ sort }}&order={{ order }}" class="btn btn-outline-secondary btn-sm">
+        <i class="bi bi-x-lg"></i> Clear
+    </a>
+    {% endif %}
+</div>
+{% endif %}
+
 <div class="card">
     <div class="table-responsive">
         <table class="table table-hover mb-0">
@@ -52,7 +80,7 @@
                     {% for col in columns %}
                     <th>
                         {% if col.sortable %}
-                        <a href="/{{ view.name }}?sort={{ col.key }}&order={{ 'desc' if sort == col.key and order == 'asc' else 'asc' }}&q={{ search }}"
+                        <a href="/{{ view.name }}?sort={{ col.key }}&order={{ 'desc' if sort == col.key and order == 'asc' else 'asc' }}&q={{ search }}{{ flt_qs }}"
                            class="sort-link {% if sort == col.key %}active{% endif %}">
                             {{ col.label }}
                             {% if sort == col.key %}
@@ -81,21 +109,36 @@
 <nav class="mt-3">
     <ul class="pagination pagination-sm justify-content-center">
         <li class="page-item {% if page <= 1 %}disabled{% endif %}">
-            <a class="page-link" href="/{{ view.name }}?page={{ page - 1 }}&q={{ search }}&sort={{ sort }}&order={{ order }}">
+            <a class="page-link" href="/{{ view.name }}?page={{ page - 1 }}&q={{ search }}&sort={{ sort }}&order={{ order }}{{ flt_qs }}">
                 <i class="bi bi-chevron-left"></i>
             </a>
         </li>
         {% for p in range(1, total_pages + 1) %}
         <li class="page-item {% if p == page %}active{% endif %}">
-            <a class="page-link" href="/{{ view.name }}?page={{ p }}&q={{ search }}&sort={{ sort }}&order={{ order }}">{{ p }}</a>
+            <a class="page-link" href="/{{ view.name }}?page={{ p }}&q={{ search }}&sort={{ sort }}&order={{ order }}{{ flt_qs }}">{{ p }}</a>
         </li>
         {% endfor %}
         <li class="page-item {% if page >= total_pages %}disabled{% endif %}">
-            <a class="page-link" href="/{{ view.name }}?page={{ page + 1 }}&q={{ search }}&sort={{ sort }}&order={{ order }}">
+            <a class="page-link" href="/{{ view.name }}?page={{ page + 1 }}&q={{ search }}&sort={{ sort }}&order={{ order }}{{ flt_qs }}">
                 <i class="bi bi-chevron-right"></i>
             </a>
         </li>
     </ul>
 </nav>
+{% endif %}
+
+{% if filter_options %}
+<script>
+function applyFilter(key, value) {
+    var url = new URL(window.location.href);
+    if (value) {
+        url.searchParams.set('flt_' + key, value);
+    } else {
+        url.searchParams.delete('flt_' + key);
+    }
+    url.searchParams.set('page', '1');
+    window.location.href = url.toString();
+}
+</script>
 {% endif %}
 {% endblock %}

@@ -184,6 +184,7 @@ class CRUDView:
     can_edit = True
     can_delete = True
     htmx_columns = None
+    column_filters = None
     export_types = None
     list_template = "list.html"
     create_template = "form.html"
@@ -371,9 +372,15 @@ class CRUDView:
             return [(getattr(item, 'id', str(item)), str(item)) for item in items]
         return []
 
-    def _build_query(self, db: Session, search: str = "", sort: str = "", order: str = "asc"):
-        """Build a query with search and sorting."""
+    def _build_query(self, db: Session, search: str = "", sort: str = "", order: str = "asc", filters: dict | None = None):
+        """Build a query with search, sorting, and column filters."""
         query = db.query(self.model)
+
+        # Apply column filters
+        if filters:
+            for col_key, value in filters.items():
+                if value and hasattr(self.model, col_key):
+                    query = query.filter(getattr(self.model, col_key) == value)
 
         if search and self.column_searchable:
             mapper = inspect(self.model)
@@ -496,7 +503,15 @@ class CRUDView:
             order: str = "asc",
             db: Session = Depends(get_db),
         ):
-            query = view._build_query(db, search=q, sort=sort, order=order)
+            # Parse active filters from query params
+            active_filters = {}
+            if view.column_filters:
+                for filt_key in view.column_filters:
+                    val = request.query_params.get(f"flt_{filt_key}", "")
+                    if val:
+                        active_filters[filt_key] = val
+
+            query = view._build_query(db, search=q, sort=sort, order=order, filters=active_filters)
             total = query.count()
             total_pages = max(1, math.ceil(total / view.page_size))
             page = max(1, min(page, total_pages))
@@ -519,6 +534,22 @@ class CRUDView:
                     }
                 rows.append(row)
 
+            # Build filter options (distinct values per filter column)
+            filter_options = {}
+            if view.column_filters:
+                for filt_key in view.column_filters:
+                    col = getattr(model, filt_key, None)
+                    if col is not None:
+                        distinct_vals = [
+                            r[0] for r in db.query(col).distinct().order_by(col).all()
+                            if r[0] is not None
+                        ]
+                        label = view.column_labels.get(filt_key, filt_key.replace("_", " ").title()) if view.column_labels else filt_key.replace("_", " ").title()
+                        filter_options[filt_key] = {
+                            "label": label,
+                            "values": [str(v.value) if hasattr(v, "value") else str(v) for v in distinct_vals],
+                        }
+
             context = {
                 "request": request,
                 "view": view,
@@ -531,6 +562,8 @@ class CRUDView:
                 "sort": sort,
                 "order": order,
                 "row_actions": view.row_actions,
+                "filter_options": filter_options,
+                "active_filters": active_filters,
             }
 
             if request.headers.get("HX-Request") and request.query_params.get("partial"):
@@ -541,6 +574,7 @@ class CRUDView:
         if view.export_types:
             @self.router.get(f"/{self.name}/export/{{fmt}}")
             async def export_view(
+                request: Request,
                 fmt: str,
                 q: str = "",
                 sort: str = "",
@@ -550,7 +584,14 @@ class CRUDView:
                 if fmt not in view.export_types:
                     return HTMLResponse("Export format not supported", status_code=400)
 
-                query = view._build_query(db, search=q, sort=sort, order=order)
+                active_filters = {}
+                if view.column_filters:
+                    for filt_key in view.column_filters:
+                        val = request.query_params.get(f"flt_{filt_key}", "")
+                        if val:
+                            active_filters[filt_key] = val
+
+                query = view._build_query(db, search=q, sort=sort, order=order, filters=active_filters)
                 items = query.all()
 
                 # Get column keys and labels

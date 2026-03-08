@@ -660,6 +660,38 @@ All default to `True`.
 
 ---
 
+## Column Filters
+
+Add dropdown filters to any list view with the `column_filters` attribute:
+
+```python
+class CustomerView(CRUDView):
+    model = Customer
+    column_filters = ["currentstatus", "region"]
+```
+
+This renders filter dropdowns above the table, populated with distinct values from each column. Labels come from `column_labels` if set. Features:
+
+- Filters apply alongside search and sorting
+- Active filters carry through pagination, search, sort, and export links
+- A "Clear" button appears when any filter is active
+- Filter params use the format `?flt_columnname=value` in the URL
+- Enum columns are supported — values are converted automatically
+
+```python
+class ServerView(CRUDView):
+    model = Server
+    column_filters = ["status", "datacenter", "os_type"]
+    column_labels = {
+        "status": "Status",
+        "datacenter": "Data Center",
+        "os_type": "OS Type",
+    }
+    export_types = ["csv"]  # export respects active filters
+```
+
+---
+
 ## Export
 
 Add CSV and/or XLSX export buttons to any list view with the `export_types` attribute:
@@ -1806,6 +1838,7 @@ fasthx-admin is designed as a drop-in conceptual replacement for Flask-Admin. He
 | `form_args` | `form_widget_overrides` | Renamed, supports HTMX attrs |
 | `form_ajax_refs` | `form_ajax_refs` | Same concept; uses HTMX instead of Select2 |
 | `column_extra_row_actions` | `row_actions` | List of dicts with HTMX attrs |
+| `column_filters` | `column_filters` | List of column names for filter dropdowns |
 | `column_export_list` | `export_types` | List of format strings (`["csv", "xlsx"]`) |
 | `@expose()` custom endpoints | `setup_endpoints()` override | Define on `self.router` |
 | `Markup()` in formatters | Raw HTML strings | Templates use `\| safe` filter |
