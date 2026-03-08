@@ -269,7 +269,7 @@ class CRUDView:
         col_map = {col_obj.key: col_obj for col_obj in mapper.columns}
         for col_key in self.form_columns:
             col_obj = col_map.get(col_key)
-            if col_obj:
+            if col_obj is not None:
                 col_type = type(col_obj.type).__name__
                 html_type = COLUMN_TYPE_MAP.get(col_type, "text")
 
