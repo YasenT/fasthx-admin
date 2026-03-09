@@ -108,12 +108,12 @@
     <script>
         // Preserve sidebar scroll position across page navigations
         (function() {
-            var sidebar = document.getElementById('sidebar');
-            if (!sidebar) return;
+            var nav = document.querySelector('.sidebar-nav');
+            if (!nav) return;
             var saved = sessionStorage.getItem('sidebarScroll');
-            if (saved) sidebar.scrollTop = parseInt(saved, 10);
-            sidebar.addEventListener('scroll', function() {
-                sessionStorage.setItem('sidebarScroll', sidebar.scrollTop);
+            if (saved) nav.scrollTop = parseInt(saved, 10);
+            nav.addEventListener('scroll', function() {
+                sessionStorage.setItem('sidebarScroll', nav.scrollTop);
             });
         })();
     </script>
