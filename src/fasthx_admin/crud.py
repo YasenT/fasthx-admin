@@ -403,10 +403,12 @@ class CRUDView:
                 if c != self.pk_field and c != "deploy_progress"
             ]
 
-        # Build column metadata for templates
+        # Build column metadata for templates (ordered by column_list)
+        col_map_meta = {col_obj.key: col_obj for col_obj in mapper.columns}
         self.columns_meta = []
-        for col_obj in mapper.columns:
-            if col_obj.key in self.column_list:
+        for key in self.column_list:
+            col_obj = col_map_meta.get(key)
+            if col_obj is not None:
                 col_type = type(col_obj.type).__name__
                 self.columns_meta.append({
                     "key": col_obj.key,
