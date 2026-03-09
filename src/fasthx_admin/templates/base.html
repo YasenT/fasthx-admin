@@ -105,6 +105,18 @@
     {% include "partials/_ai_chat_widget.html" %}
     <script src="{{ static_url }}/js/ai-chat.js"></script>
     {% endif %}
+    <script>
+        // Preserve sidebar scroll position across page navigations
+        (function() {
+            var sidebar = document.getElementById('sidebar');
+            if (!sidebar) return;
+            var saved = sessionStorage.getItem('sidebarScroll');
+            if (saved) sidebar.scrollTop = parseInt(saved, 10);
+            sidebar.addEventListener('scroll', function() {
+                sessionStorage.setItem('sidebarScroll', sidebar.scrollTop);
+            });
+        })();
+    </script>
     {% block extra_js %}{% endblock %}
 </body>
 </html>
