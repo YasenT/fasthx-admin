@@ -1035,7 +1035,7 @@ class CRUDView:
             if key in form_data:
                 value = form_data[key]
                 col = mapper.columns[key]
-                col_type = type(col.type).__name__
+                col_type = type(col.type).__name__.upper()
 
                 if col_type == "INTEGER":
                     value = int(value) if value else None
@@ -1043,6 +1043,8 @@ class CRUDView:
                     value = float(value) if value else None
                 elif col_type == "BOOLEAN":
                     value = value in ("true", "1", "on", "True")
+                elif not value and col.nullable:
+                    value = None
 
                 if hasattr(col.type, "enum_class") and col.type.enum_class and value:
                     value = col.type.enum_class(value)
