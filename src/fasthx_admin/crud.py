@@ -1111,6 +1111,8 @@ class Admin:
         public_pages: set[str] | None = None,
         ai_chat: bool = False,
         extra_templates_dirs: list[str] | None = None,
+        settings_admin_groups: list[str] | None = None,
+        settings_admin_users: list[str] | None = None,
     ):
         self.app = app
         self.title = title
@@ -1120,6 +1122,8 @@ class Admin:
         self._view_map: dict[str, CRUDView] = {}
         self._custom_links: list[dict] = []
         self.ai_chat_enabled = ai_chat
+        self.settings_admin_groups = settings_admin_groups
+        self.settings_admin_users = settings_admin_users
 
         # Set up Jinja2 templates (use built-in if not provided)
         if templates is not None:
@@ -1176,7 +1180,7 @@ class Admin:
                 return RedirectResponse("/login", status_code=303)
 
             context.setdefault("current_user", user)
-            context.setdefault("nav_categories", admin.get_nav_categories())
+            context.setdefault("nav_categories", admin.get_nav_categories(user))
             context.setdefault("active_page", "")
             context.setdefault("static_url", admin.static_url)
             context.setdefault("admin_title", admin.title)
@@ -1218,7 +1222,7 @@ class Admin:
             "category": category,
         })
 
-    def get_nav_categories(self) -> dict:
+    def get_nav_categories(self, user: dict | None = None) -> dict:
         """Build sidebar navigation from all registered views."""
         categories = defaultdict(list)
         for view in self.views:
@@ -1232,4 +1236,16 @@ class Admin:
                 "display_name": link["display_name"],
                 "icon": link["icon"],
             })
+
+        # Hide Settings category unless user matches allowed groups or users
+        if (self.settings_admin_groups or self.settings_admin_users) and "Settings" in categories:
+            username = (user or {}).get("username", "")
+            user_groups = (user or {}).get("groups", [])
+            allowed_by_user = self.settings_admin_users and username in self.settings_admin_users
+            allowed_by_group = self.settings_admin_groups and any(
+                g in self.settings_admin_groups for g in user_groups
+            )
+            if not (allowed_by_user or allowed_by_group):
+                del categories["Settings"]
+
         return dict(categories)
