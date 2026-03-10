@@ -56,6 +56,7 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
   - [Row Actions](#row-actions)
   - [HTMX Polling Columns](#htmx-polling-columns)
   - [Permissions](#permissions)
+  - [Sidebar Visibility](#sidebar-visibility)
 - [Custom Endpoints](#custom-endpoints)
   - [Endpoint Decorator (Recommended)](#endpoint-decorator-recommended)
   - [setup_endpoints Override (Legacy)](#setup_endpoints-override-legacy)
@@ -95,6 +96,7 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
 - **Custom row actions** -- per-row buttons with HTMX (deploy, build, reset, etc.)
 - **Collapsible sidebar categories** -- click category headers to collapse/expand, state persisted in localStorage, active category auto-expands
 - **Responsive sidebar** -- auto-grouped from model metadata, collapses on mobile
+- **View-level permissions** -- restrict sidebar visibility of views and links by user or group (`allowed_users`, `allowed_groups`)
 - **OIDC/Keycloak auth** -- Resource Owner Password Credentials flow with group-based access
 - **Dev mode** -- set `AUTH_DISABLED=1` to bypass auth entirely
 - **Foreign key dropdowns** -- auto-populated from related models
@@ -663,6 +665,40 @@ class AuditLogView(CRUDView):
 ```
 
 All default to `True`.
+
+### Sidebar Visibility
+
+Restrict which users or groups can see a view in the sidebar. By default all views are visible to everyone. When `allowed_users` or `allowed_groups` is set, only matching users see the view in the sidebar.
+
+```python
+class InternalToolsView(CRUDView):
+    model = InternalTool
+    allowed_users = ["admin", "devops"]         # Only these usernames see this view
+
+class NetworkView(CRUDView):
+    model = NetworkDevice
+    allowed_groups = ["/Edge-Admins", "/NOC"]    # Only members of these groups see this view
+```
+
+| Attribute | Type | Default | Description |
+|---|---|---|---|
+| `allowed_users` | `list[str]` | `None` | Usernames that can see this view in the sidebar. `None` = visible to all. |
+| `allowed_groups` | `list[str]` | `None` | Group DNs that can see this view. `None` = visible to all. |
+
+If both are set, matching either list grants visibility. This only controls sidebar visibility — it does not block direct URL access to the routes.
+
+The same `allowed_users` and `allowed_groups` parameters are available on `admin.add_link()` for custom navigation links:
+
+```python
+admin.add_link("debug", "/debug", "Debug Tools", icon="bug", category="Dev",
+               allowed_users=["admin"])
+```
+
+**Note:** The Settings category (AI Settings) uses a separate mechanism — `settings_admin_users` and `settings_admin_groups` on the `Admin` constructor. Unlike views, Settings is **hidden by default** and requires an explicit allow list to be visible:
+
+```python
+admin = Admin(app, ai_chat=True, settings_admin_users=["admin"])
+```
 
 ---
 
@@ -1726,6 +1762,8 @@ admin.add_link("docs", "/docs", "API Docs", icon="book", category="Tools")
 | `display_name` | `str` | required | Text shown in the sidebar |
 | `icon` | `str` | `"link"` | Bootstrap Icons name |
 | `category` | `str` | `"Other"` | Sidebar category group |
+| `allowed_users` | `list[str]` | `None` | Usernames that can see this link. `None` = visible to all. |
+| `allowed_groups` | `list[str]` | `None` | Group DNs that can see this link. `None` = visible to all. |
 
 Sidebar categories are collapsible -- click a category header to collapse/expand its items. The collapse state is persisted in `localStorage`. Categories containing the currently active page auto-expand.
 

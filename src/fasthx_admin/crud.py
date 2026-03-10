@@ -340,6 +340,8 @@ class CRUDView:
     list_template = "list.html"
     create_template = "form.html"
     edit_template = "form.html"
+    allowed_users = None
+    allowed_groups = None
 
     def __init__(self, templates):
         model = self.model
@@ -1217,6 +1219,8 @@ class Admin:
         display_name: str,
         icon: str = "link",
         category: str = "Other",
+        allowed_users: list[str] | None = None,
+        allowed_groups: list[str] | None = None,
     ):
         """Add a custom navigation link to the sidebar."""
         self._custom_links.append({
@@ -1225,15 +1229,38 @@ class Admin:
             "display_name": display_name,
             "icon": icon,
             "category": category,
+            "allowed_users": allowed_users,
+            "allowed_groups": allowed_groups,
         })
+
+    @staticmethod
+    def _user_allowed(user: dict | None, allowed_users: list[str] | None, allowed_groups: list[str] | None) -> bool:
+        """Check if a user is allowed based on allowed_users/allowed_groups lists.
+
+        If neither list is set, returns True (visible to all).
+        If either list is set, the user must match at least one entry.
+        """
+        if not allowed_users and not allowed_groups:
+            return True
+        username = (user or {}).get("username", "")
+        user_groups = (user or {}).get("groups", [])
+        if allowed_users and username in allowed_users:
+            return True
+        if allowed_groups and any(g in allowed_groups for g in user_groups):
+            return True
+        return False
 
     def get_nav_categories(self, user: dict | None = None) -> dict:
         """Build sidebar navigation from all registered views."""
         categories = defaultdict(list)
         for view in self.views:
+            if not self._user_allowed(user, view.allowed_users, view.allowed_groups):
+                continue
             cat = view.category or "Other"
             categories[cat].append(view.get_nav_info())
         for link in self._custom_links:
+            if not self._user_allowed(user, link.get("allowed_users"), link.get("allowed_groups")):
+                continue
             cat = link.get("category", "Other")
             categories[cat].append({
                 "name": link["name"],
@@ -1242,17 +1269,14 @@ class Admin:
                 "icon": link["icon"],
             })
 
-        # Hide Settings category unless user is explicitly allowed.
-        # If neither settings_admin_groups nor settings_admin_users is
-        # configured, Settings is hidden from everyone by default.
+        # Settings category: hidden by default unless user is explicitly allowed
+        # via settings_admin_users/settings_admin_groups on the Admin instance.
+        # Unlike views/links (visible by default), Settings requires an explicit
+        # allow list — if neither is configured, no one sees it.
         if "Settings" in categories:
-            username = (user or {}).get("username", "")
-            user_groups = (user or {}).get("groups", [])
-            allowed_by_user = self.settings_admin_users and username in self.settings_admin_users
-            allowed_by_group = self.settings_admin_groups and any(
-                g in self.settings_admin_groups for g in user_groups
-            )
-            if not (allowed_by_user or allowed_by_group):
+            if not self.settings_admin_users and not self.settings_admin_groups:
+                del categories["Settings"]
+            elif not self._user_allowed(user, self.settings_admin_users, self.settings_admin_groups):
                 del categories["Settings"]
 
         return dict(categories)
