@@ -605,17 +605,21 @@ class CRUDView:
         model = self.model
         templates = self.templates
         view = self
+        formatters = self.column_formatters or {}
 
         for field_key, config in self.htmx_columns.items():
             # Convert URL pattern: /edges/{id}/status -> /edges/{item_id}/status
             url = config["url"].replace("{id}", "{item_id}")
+            formatter = formatters.get(field_key)
 
-            def make_handler(fk):
+            def make_handler(fk, fmt):
                 async def handler(request: Request, item_id, db: Session = Depends(get_db)):
                     item = db.query(model).filter(getattr(model, view.pk_field) == item_id).first()
                     if not item:
                         return HTMLResponse("")
                     value = getattr(item, fk)
+                    if fmt:
+                        return HTMLResponse(fmt(value, item))
                     status = value.value if hasattr(value, "value") else str(value)
                     return templates.TemplateResponse("partials/status_cell.html", {
                         "request": request,
@@ -626,7 +630,7 @@ class CRUDView:
 
             self.router.add_api_route(
                 url,
-                make_handler(field_key),
+                make_handler(field_key, formatter),
                 methods=["GET"],
                 response_class=HTMLResponse,
             )
