@@ -163,6 +163,26 @@ function getAjaxTomSelectOptions(el) {
     };
 }
 
+// Clean up stale Tom Select instances and orphaned wrappers.
+// Called before re-initialization after full-page HTMX swaps (hx-boost).
+function cleanupTomSelects(root) {
+    if (typeof TomSelect === 'undefined') return;
+    var container = root || document;
+    container.querySelectorAll('select.form-select').forEach(function (el) {
+        // Destroy stale instance if the property survived the swap
+        if (el.tomselect) {
+            try { el.tomselect.destroy(); } catch (e) {}
+        }
+        // Remove orphaned wrapper siblings left behind by the swap
+        var next = el.nextElementSibling;
+        if (next && next.classList.contains('ts-wrapper')) {
+            next.remove();
+        }
+        // Remove Tom Select classes from the raw select so it starts clean
+        el.classList.remove('tomselected', 'ts-hidden-accessible');
+    });
+}
+
 function initTomSelect(root) {
     if (typeof TomSelect === 'undefined') return;
     var container = root || document;
@@ -238,6 +258,18 @@ document.addEventListener('DOMContentLoaded', function () {
     initDependsOn();
 });
 
+// Destroy Tom Select instances before HTMX replaces the DOM (prevents orphaned wrappers)
+document.addEventListener('htmx:beforeSwap', function (event) {
+    var target = event.detail.target;
+    if (target === document.body || target === document.documentElement) {
+        document.querySelectorAll('select.form-select').forEach(function (el) {
+            if (el.tomselect) {
+                try { el.tomselect.destroy(); } catch (e) {}
+            }
+        });
+    }
+});
+
 // Re-initialize after HTMX swaps new content in
 document.addEventListener('htmx:afterSwap', function (event) {
     syncTomSelect(event.detail.target);
@@ -249,6 +281,7 @@ document.addEventListener('htmx:afterSwap', function (event) {
 document.addEventListener('htmx:afterSettle', function (event) {
     var target = event.detail.target;
     if (target === document.body || target === document.documentElement) {
+        cleanupTomSelects();
         initTomSelect();
         initDependsOn();
     }
