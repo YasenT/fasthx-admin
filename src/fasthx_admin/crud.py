@@ -1046,6 +1046,11 @@ class CRUDView:
                 elif not value and col.nullable:
                     value = None
 
+                # Reject empty values for non-nullable fields (except booleans)
+                if not value and value != 0 and value is not False and not col.nullable and col.default is None:
+                    label = field.get("label") or key.replace("_", " ").title()
+                    raise ValidationError(f"{label} is required")
+
                 if hasattr(col.type, "enum_class") and col.type.enum_class and value:
                     value = col.type.enum_class(value)
 
