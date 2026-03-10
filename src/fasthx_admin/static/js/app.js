@@ -245,6 +245,15 @@ document.addEventListener('htmx:afterSwap', function (event) {
     initDependsOn(event.detail.target);
 });
 
+// Re-initialize after boosted full-page swaps settle (e.g. form validation errors)
+document.addEventListener('htmx:afterSettle', function (event) {
+    var target = event.detail.target;
+    if (target === document.body || target === document.documentElement) {
+        initTomSelect();
+        initDependsOn();
+    }
+});
+
 // Handle out-of-band swaps (dependent dropdowns with multiple targets)
 document.addEventListener('htmx:oobAfterSwap', function (event) {
     syncTomSelect(event.detail.target);

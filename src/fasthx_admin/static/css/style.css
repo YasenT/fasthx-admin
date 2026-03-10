@@ -268,6 +268,35 @@ body {
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: #6b7280;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+}
+
+.sidebar-category:hover {
+    color: #9ca3af;
+}
+
+.sidebar-category-icon {
+    font-size: 0.6rem;
+    transition: transform 0.2s ease;
+}
+
+.sidebar-category.is-collapsed .sidebar-category-icon {
+    transform: rotate(-90deg);
+}
+
+/* Collapsible items container */
+.sidebar-category-items {
+    overflow: hidden;
+    max-height: 500px;
+    transition: max-height 0.25s ease;
+}
+
+.sidebar-category-items.collapsed {
+    max-height: 0;
 }
 
 .sidebar-item {
