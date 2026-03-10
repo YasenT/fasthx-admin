@@ -74,6 +74,7 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
   - [Custom Providers](#custom-providers)
   - [AI Chat API Endpoints](#ai-chat-api-endpoints)
 - [Custom Pages (Dashboard, Wizard, etc.)](#custom-pages-dashboard-wizard-etc)
+- [Custom Navigation Links](#custom-navigation-links)
 - [Templates](#templates)
 - [Theming](#theming)
 - [Auto-Generated Routes](#auto-generated-routes)
@@ -92,6 +93,7 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
 - **Accordion form sections** -- group form fields into collapsible sections
 - **Custom column formatters** -- render badges, links, icons, code blocks in table cells
 - **Custom row actions** -- per-row buttons with HTMX (deploy, build, reset, etc.)
+- **Collapsible sidebar categories** -- click category headers to collapse/expand, state persisted in localStorage, active category auto-expands
 - **Responsive sidebar** -- auto-grouped from model metadata, collapses on mobile
 - **OIDC/Keycloak auth** -- Resource Owner Password Credentials flow with group-based access
 - **Dev mode** -- set `AUTH_DISABLED=1` to bypass auth entirely
@@ -311,6 +313,7 @@ admin = Admin(
 | `mount_statics` | `bool` | `True` | Whether to auto-mount built-in CSS/JS |
 | `public_pages` | `set[str]` | `{"login.html"}` | Template names that don't require authentication |
 | `ai_chat` | `bool` | `False` | Enable the AI chat widget and settings pages (requires `fasthx-admin[ai]`) |
+| `extra_templates_dirs` | `list[str]` | `None` | Additional template directories to search before the built-in ones (for overriding or extending templates) |
 
 ### Methods
 
@@ -318,6 +321,7 @@ admin = Admin(
 |---|---|
 | `admin.add_view(ViewClass)` | Instantiate a CRUDView subclass and register its routes. Returns the instance. |
 | `admin.get_view("name")` | Look up a registered view by its `name` attribute. |
+| `admin.add_link(name, url, display_name, icon="link", category="Other")` | Add a custom navigation link to the sidebar (non-CRUD). |
 | `admin.get_nav_categories()` | Returns the sidebar navigation structure as a dict. |
 | `admin.templates` | The Jinja2Templates instance -- use for rendering custom pages. |
 
@@ -1704,6 +1708,27 @@ async def root():
 
 ---
 
+## Custom Navigation Links
+
+Use `admin.add_link()` to add non-CRUD links to the sidebar. These appear alongside your CRUDView entries, grouped by category.
+
+```python
+admin.add_link("reports", "/reports", "Reports", icon="graph-up", category="Analytics")
+admin.add_link("docs", "/docs", "API Docs", icon="book", category="Tools")
+```
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `name` | `str` | required | Unique identifier for the link |
+| `url` | `str` | required | URL the link points to |
+| `display_name` | `str` | required | Text shown in the sidebar |
+| `icon` | `str` | `"link"` | Bootstrap Icons name |
+| `category` | `str` | `"Other"` | Sidebar category group |
+
+Sidebar categories are collapsible -- click a category header to collapse/expand its items. The collapse state is persisted in `localStorage`. Categories containing the currently active page auto-expand.
+
+---
+
 ## Templates
 
 fasthx-admin ships with these built-in templates:
@@ -1734,12 +1759,17 @@ fasthx-admin ships with these built-in templates:
 
 ### Using custom templates
 
-Pass your own Jinja2Templates instance to override any template:
+Use `extra_templates_dirs` to add directories that are searched before the built-in ones. Templates in your directories override built-in templates with the same name:
+
+```python
+admin = Admin(app, extra_templates_dirs=["my_templates"])
+```
+
+Alternatively, pass your own Jinja2Templates instance for full control:
 
 ```python
 from fastapi.templating import Jinja2Templates
 
-# Your templates directory can extend/override the built-in ones
 templates = Jinja2Templates(directory="my_templates")
 admin = Admin(app, templates=templates, mount_statics=True)
 ```
@@ -1755,6 +1785,7 @@ Every template rendered through `admin.templates.TemplateResponse()` automatical
 | `active_page` | Which sidebar item to highlight |
 | `static_url` | URL prefix for static assets |
 | `admin_title` | The configured admin title |
+| `ai_chat_enabled` | Whether the AI chat widget is active |
 
 ---
 
@@ -1883,4 +1914,5 @@ The demo includes:
 | Auth | OIDC / Keycloak (via [requests](https://requests.readthedocs.io/)) |
 | AI Chat | [httpx](https://www.python-httpx.org/) (optional `[ai]` extra) + [marked.js](https://marked.js.org/) / [DOMPurify](https://github.com/cure53/DOMPurify) (CDN) |
 | Server | [Uvicorn](https://www.uvicorn.org/) (dev dependency) |
-| JavaScript | Minimal -- theme toggle + HTMX event hooks + AI chat widget |
+| Selects | [Tom Select 2.4](https://tom-select.js.org/) (CDN) -- searchable dropdowns |
+| JavaScript | Minimal -- theme toggle + HTMX event hooks + Tom Select init + AI chat widget |
