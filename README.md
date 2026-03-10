@@ -314,6 +314,8 @@ admin = Admin(
 | `public_pages` | `set[str]` | `{"login.html"}` | Template names that don't require authentication |
 | `ai_chat` | `bool` | `False` | Enable the AI chat widget and settings pages (requires `fasthx-admin[ai]`) |
 | `extra_templates_dirs` | `list[str]` | `None` | Additional template directories to search before the built-in ones (for overriding or extending templates) |
+| `settings_admin_groups` | `list[str]` | `None` | Keycloak group DNs allowed to see the Settings sidebar category (e.g. `["/Edge-Admins"]`) |
+| `settings_admin_users` | `list[str]` | `None` | Usernames allowed to see the Settings sidebar category (e.g. `["admin"]`) |
 
 ### Methods
 

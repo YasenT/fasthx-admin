@@ -1237,8 +1237,10 @@ class Admin:
                 "icon": link["icon"],
             })
 
-        # Hide Settings category unless user matches allowed groups or users
-        if (self.settings_admin_groups or self.settings_admin_users) and "Settings" in categories:
+        # Hide Settings category unless user is explicitly allowed.
+        # If neither settings_admin_groups nor settings_admin_users is
+        # configured, Settings is hidden from everyone by default.
+        if "Settings" in categories:
             username = (user or {}).get("username", "")
             user_groups = (user or {}).get("groups", [])
             allowed_by_user = self.settings_admin_users and username in self.settings_admin_users
