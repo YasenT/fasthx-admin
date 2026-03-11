@@ -218,6 +218,7 @@ class CustomerView(CRUDView):
 
 class OrchestratorView(CRUDView):
     model = Orchestrator
+    allowed_users = ["dev"]
     column_list = ["id", "address", "type", "apiname", "version", "build_status", "customer_id"]
     column_formatters = {
         "build_status": format_build_status,

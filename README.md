@@ -78,6 +78,7 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
 - [Custom Navigation Links](#custom-navigation-links)
 - [Templates](#templates)
 - [Theming](#theming)
+- [Icons](#icons)
 - [Auto-Generated Routes](#auto-generated-routes)
 - [Environment Variables](#environment-variables)
 - [Flask-Admin Migration Guide](#flask-admin-migration-guide)
@@ -1846,6 +1847,38 @@ The built-in CSS supports dark and light themes via Bootstrap's `data-bs-theme` 
 | `--info` | `#3b82f6` | same |
 
 Theme is toggled via the sun/moon button in the topbar and persisted in `localStorage`.
+
+---
+
+## Icons
+
+fasthx-admin uses [Bootstrap Icons 1.11.3](https://icons.getbootstrap.com/) loaded via CDN. Over 2,000 icons are available.
+
+### Setting icons on models
+
+Use the `__admin_icon__` attribute on your SQLAlchemy model:
+
+```python
+class Device(Base):
+    __tablename__ = "devices"
+    __admin_icon__ = "router"       # Any Bootstrap Icons name
+```
+
+### Setting icons on views
+
+Override the icon at the view level with the `icon` class attribute:
+
+```python
+class DeviceView(CRUDView):
+    model = Device
+    icon = "hdd-network"            # Overrides model's __admin_icon__
+```
+
+The default icon is `"table"` if neither the model nor view specifies one.
+
+### Finding icon names
+
+Browse the full icon set at [icons.getbootstrap.com](https://icons.getbootstrap.com/). Use the name shown on each icon's page (e.g., `"people"`, `"gear"`, `"cart"`, `"shield-lock"`).
 
 ---
 
