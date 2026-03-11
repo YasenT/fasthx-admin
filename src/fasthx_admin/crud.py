@@ -25,6 +25,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import inspect, or_, String, cast
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from celery import Celery
 
 from .auth import get_current_user
 from .database import get_db
@@ -251,6 +252,20 @@ def modal_response(
     }
 
     return HTMLResponse(content, status_code=status_code, headers=headers)
+
+
+def celery_send_task(model, namespace:str, task_name:str) -> HTMLResponse:
+    """ Helper for sending a Celery task from a CRUDView endpoint, with toast response."""
+
+    if not Admin.celery_app:
+        return toast_response("Celery app not configured", type="danger", status_code=500)
+    try:
+        result = Admin.celery_app.send_task(f"{namespace.lower()}.{task_name}", 
+                                               args=[str(model.id)], 
+                                               queue=f"{namespace.lower()}")
+        return toast_response(f"Task {result.id} sent to Celery!", type="success")
+    except Exception as e:
+        return toast_response(f"Failed to send task: {str(e)}", type="danger", status_code=500)
 
 
 def _parse_filter_params(request: Request, column_filters, column_labels=None) -> list:
@@ -1248,6 +1263,7 @@ class Admin:
         self.ai_chat_enabled = ai_chat
         self.settings_admin_groups = settings_admin_groups
         self.settings_admin_users = settings_admin_users
+        self.celery_app: Celery | None = None
 
         # Set up Jinja2 templates (use built-in if not provided)
         if templates is not None:
@@ -1349,6 +1365,7 @@ class Admin:
             "allowed_users": allowed_users,
             "allowed_groups": allowed_groups,
         })
+
 
     @staticmethod
     def _user_allowed(user: dict | None, allowed_users: list[str] | None, allowed_groups: list[str] | None) -> bool:

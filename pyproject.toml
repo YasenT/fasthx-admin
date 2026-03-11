@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "fasthx-admin"
-version = "0.3.49"
+version = "0.4.0"
 description = "FastAPI + HTMX + Jinja2 admin interface framework — a modern replacement for Flask-Admin"
 readme = "README.md"
 license = "MIT"
@@ -14,7 +14,7 @@ authors = [
 ]
 keywords = ["fastapi", "htmx", "admin", "crud", "jinja2"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Framework :: FastAPI",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
@@ -33,6 +33,7 @@ dependencies = [
     "python-multipart",
     "requests",
     "itsdangerous",
+    "celery",
 ]
 
 [project.optional-dependencies]
