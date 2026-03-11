@@ -59,6 +59,21 @@ function showToast(detail) {
     }
 }
 
+// Modal — triggered via HX-Trigger: {"showModal": {}}
+function showModal(detail) {
+    var modalEl = document.getElementById('admin-modal');
+    if (!modalEl) return;
+    var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+    var dialog = modalEl.querySelector('.modal-dialog');
+    if (dialog) {
+        dialog.classList.remove('modal-lg', 'modal-xl', 'modal-sm');
+        if (detail && detail.size) {
+            dialog.classList.add(detail.size);
+        }
+    }
+    modal.show();
+}
+
 // For non-redirect responses, show the toast after the DOM swap.
 var _lastToastXhr = null;
 document.addEventListener('htmx:afterSettle', function (event) {
@@ -71,6 +86,9 @@ document.addEventListener('htmx:afterSettle', function (event) {
         if (data.showToast) {
             _lastToastXhr = xhr;
             setTimeout(function () { showToast(data.showToast); }, 50);
+        }
+        if (data.showModal) {
+            showModal(data.showModal);
         }
     } catch (e) {}
 });
@@ -275,6 +293,12 @@ document.addEventListener('htmx:afterSwap', function (event) {
     syncTomSelect(event.detail.target);
     initTomSelect(event.detail.target);
     initDependsOn(event.detail.target);
+    // Auto-open modal when content is swapped into it
+    var target = event.detail.target;
+    if (target && target.closest && target.closest('#admin-modal')) {
+        var modalEl = document.getElementById('admin-modal');
+        if (modalEl) bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    }
 });
 
 // Re-initialize after boosted full-page swaps settle (e.g. form validation errors)

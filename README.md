@@ -63,6 +63,7 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
   - [Instance State in Custom Endpoints](#instance-state-in-custom-endpoints)
 - [Dependent Dropdowns](#dependent-dropdowns)
 - [Toast Notifications](#toast-notifications)
+- [Modals](#modals)
 - [Validation](#validation)
 - [Progress Bar](#progress-bar)
 - [Authentication](#authentication)
@@ -990,6 +991,95 @@ You can also trigger toasts from client-side JavaScript:
 ```js
 showToast({ message: "Saved!", type: "success" });
 showToast({ message: "Something went wrong", type: "danger", title: "Error" });
+```
+
+---
+
+## Modals
+
+fasthx-admin includes a built-in modal system using Bootstrap 5 modals and HTMX. Use modals to preview content, confirm actions, or display data without leaving the list view — ideal for file previews, detail popups, and download confirmations.
+
+### modal_response helper
+
+Use `modal_response()` in custom endpoints to display content in a modal:
+
+```python
+from fasthx_admin import CRUDView, modal_response
+
+class EdgeView(CRUDView):
+    model = FortiEdge
+
+    row_actions = [
+        {
+            "label": "Template",
+            "icon": "download",
+            "hx_get": "/edges/{id}/template",   # Uses hx_get — modal_response handles targeting
+        },
+    ]
+
+    @CRUDView.endpoint("/{name}/{item_id}/template", methods=["GET"])
+    async def template_preview(self, request: Request, item_id: int, db: Session = Depends(get_db)):
+        item = db.query(self.model).filter(self.model.id == item_id).first()
+        if not item:
+            return HTMLResponse("Not found", status_code=404)
+
+        template_text = "# Generated config for " + item.hostname
+        return modal_response(
+            title=f"Template — {item.hostname}",
+            body=f"<pre>{template_text}</pre>",
+            actions=[
+                {
+                    "label": "Download",
+                    "icon": "download",
+                    "href": f"/edges/{item_id}/template/download",
+                    "css_class": "btn btn-primary",
+                },
+            ],
+            size="modal-lg",
+        )
+```
+
+The modal opens automatically when the response arrives. A "Close" button is always included in the footer.
+
+### Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `title` | Modal header title (auto-escaped) |
+| `body` | HTML string for the modal body (trusted, not escaped — same as `column_formatters`) |
+| `actions` | Optional list of action button dicts (see below) |
+| `size` | Optional modal size: `"modal-sm"`, `"modal-lg"`, or `"modal-xl"` (default: standard) |
+| `status_code` | HTTP status code (default 200) |
+
+### Action buttons
+
+Each action in the `actions` list is a dict:
+
+| Field | Description |
+|-------|-------------|
+| `label` | Button text |
+| `icon` | Bootstrap Icons name (optional) |
+| `href` | Link URL — renders as `<a>` (use for downloads, navigation) |
+| `hx_post` | HTMX POST URL — renders as `<button>` |
+| `hx_get` | HTMX GET URL — renders as `<button>` |
+| `css_class` | CSS classes (default: `"btn btn-secondary"`) |
+
+### How it works
+
+1. A row action with `hx_get` sends a GET request to your endpoint
+2. `modal_response()` returns HTML for the modal content with `HX-Retarget` and `HX-Reswap` headers that redirect the response into `#admin-modal .modal-content`
+3. An `HX-Trigger: showModal` header tells the client JS to open the modal
+4. The JS applies any size class and calls `bootstrap.Modal.show()`
+
+Because `modal_response()` uses `HX-Retarget`, it works regardless of what `hx_target` is set on the triggering element — the response always ends up in the modal.
+
+### JavaScript API
+
+You can also open the modal from client-side JavaScript:
+
+```js
+showModal();                        // Open with current content
+showModal({ size: 'modal-lg' });    // Open with large size
 ```
 
 ---

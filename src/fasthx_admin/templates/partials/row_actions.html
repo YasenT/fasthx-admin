@@ -27,15 +27,15 @@
             </a>
             {% else %}
             <button class="dropdown-item"
-                    {% if action.get('hx_post') %}
+                    {% if action.get('hx_get') %}
+                    hx-get="{{ action.hx_get | replace('{id}', row._id|string) }}"
+                    {% elif action.get('hx_post') %}
                     hx-post="{{ action.hx_post | replace('{id}', row._id|string) }}"
-                    hx-target="{{ action.get('hx_target', 'closest tr') }}"
-                    hx-swap="{{ action.get('hx_swap', 'afterend') }}"
                     {% elif action.get('endpoint') %}
                     hx-post="{{ action.endpoint | replace('{id}', row._id|string) }}"
-                    hx-swap="afterend"
-                    hx-target="closest tr"
                     {% endif %}
+                    hx-target="{{ action.get('hx_target', 'closest tr') }}"
+                    hx-swap="{{ action.get('hx_swap', 'afterend') }}"
                     {% if action.get('confirm') %}
                     hx-confirm="{{ action.confirm }}"
                     {% endif %}>

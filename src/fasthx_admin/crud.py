@@ -155,6 +155,103 @@ def toast_response(
     return response
 
 
+def modal_response(
+    title: str,
+    body: str,
+    actions: Optional[List[Dict[str, Any]]] = None,
+    size: Optional[str] = None,
+    status_code: int = 200,
+) -> HTMLResponse:
+    """Return an HTMLResponse that renders content inside the admin modal.
+
+    The response targets ``#admin-modal .modal-content`` via ``HX-Retarget``
+    and triggers the ``showModal`` event so the Bootstrap modal opens
+    automatically.
+
+    Usage in a custom endpoint::
+
+        @CRUDView.endpoint("/{name}/{item_id}/preview", methods=["GET"])
+        async def preview(self, ...):
+            return modal_response(
+                title="Preview",
+                body="<p>Content here</p>",
+                actions=[{"label": "Download", "icon": "download",
+                          "href": "/download/123", "css_class": "btn btn-primary"}],
+                size="modal-lg",
+            )
+
+    Args:
+        title: Modal header title text (auto-escaped).
+        body: HTML string for the modal body (trusted, not escaped).
+        actions: Optional list of action button dicts. Each may contain:
+            - label (str): Button text.
+            - icon (str): Bootstrap icon name (without ``bi-`` prefix).
+            - href (str): Link URL (renders as ``<a>``).
+            - hx_post (str): HTMX post URL (renders as ``<button>``).
+            - hx_get (str): HTMX get URL (renders as ``<button>``).
+            - css_class (str): CSS classes (default ``"btn btn-secondary"``).
+        size: Optional modal size class (``"modal-lg"``, ``"modal-xl"``,
+            ``"modal-sm"``).
+        status_code: HTTP status code (default 200).
+    """
+    import html as html_mod
+
+    safe_title = html_mod.escape(title)
+
+    actions_html = ""
+    if actions:
+        buttons = []
+        for action in actions:
+            css_class = action.get("css_class", "btn btn-secondary")
+            icon_html = (
+                f'<i class="bi bi-{html_mod.escape(action["icon"])}"></i> '
+                if action.get("icon")
+                else ""
+            )
+            label = html_mod.escape(action.get("label", ""))
+            if action.get("href"):
+                buttons.append(
+                    f'<a href="{action["href"]}" class="{css_class}">'
+                    f"{icon_html}{label}</a>"
+                )
+            else:
+                attrs = []
+                if action.get("hx_post"):
+                    attrs.append(f'hx-post="{action["hx_post"]}"')
+                if action.get("hx_get"):
+                    attrs.append(f'hx-get="{action["hx_get"]}"')
+                attr_str = " ".join(attrs)
+                buttons.append(
+                    f'<button type="button" class="{css_class}" {attr_str}>'
+                    f"{icon_html}{label}</button>"
+                )
+        actions_html = "\n        ".join(buttons)
+
+    content = f"""<div class="modal-header">
+        <h5 class="modal-title" id="admin-modal-title">{safe_title}</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+    </div>
+    <div class="modal-body">
+        {body}
+    </div>
+    <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        {actions_html}
+    </div>"""
+
+    trigger_data: Dict[str, Any] = {}
+    if size:
+        trigger_data["size"] = size
+
+    headers: Dict[str, str] = {
+        "HX-Trigger": json.dumps({"showModal": trigger_data}),
+        "HX-Retarget": "#admin-modal .modal-content",
+        "HX-Reswap": "innerHTML",
+    }
+
+    return HTMLResponse(content, status_code=status_code, headers=headers)
+
+
 def _parse_filter_params(request: Request, column_filters, column_labels=None) -> list:
     """Parse filter parameters from query string.
 
