@@ -17,6 +17,15 @@
         {% endif %}
         {% for action in row_actions %}
         <li>
+            {% if action.get('href') %}
+            <a href="{{ action.href | replace('{id}', row._id|string) }}" class="dropdown-item"
+               {% if action.get('download') %}download{% endif %}
+               {% if action.get('target') %}target="{{ action.target }}"{% endif %}
+               {% if action.get('confirm') %}onclick="return confirm('{{ action.confirm }}')"{% endif %}>
+                {% if action.get('icon') %}<i class="bi bi-{{ action.icon }}"></i>{% endif %}
+                {{ action.label }}
+            </a>
+            {% else %}
             <button class="dropdown-item"
                     {% if action.get('hx_post') %}
                     hx-post="{{ action.hx_post | replace('{id}', row._id|string) }}"
@@ -33,6 +42,7 @@
                 {% if action.get('icon') %}<i class="bi bi-{{ action.icon }}"></i>{% endif %}
                 {{ action.label }}
             </button>
+            {% endif %}
         </li>
         {% endfor %}
         {% if view.can_delete %}

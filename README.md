@@ -622,6 +622,25 @@ class EdgeView(CRUDView):
 
 Every row also gets View and Edit buttons automatically (based on permissions), plus a Delete button with confirmation.
 
+#### Link-based row actions (file downloads, navigation)
+
+For actions that should trigger a file download or navigate to a URL (instead of an HTMX swap), use `href` instead of `hx_post`:
+
+```python
+class EdgeView(CRUDView):
+    model = FortiEdge
+    row_actions = [
+        {
+            "label": "Template",
+            "icon": "download",
+            "href": "/edges/{id}/template",   # Regular link ({id} replaced per row)
+            "confirm": "Download onboarding template?",
+        },
+    ]
+```
+
+This renders a standard `<a>` link instead of an HTMX button, so the browser handles the response natively — essential for file downloads where the endpoint returns a `StreamingResponse` with `Content-Disposition: attachment`.
+
 ### Row action fields
 
 | Field | Description |
@@ -631,6 +650,9 @@ Every row also gets View and Edit buttons automatically (based on permissions), 
 | `hx_post` | HTMX POST URL. `{id}` is replaced with the row's primary key. |
 | `hx_target` | HTMX target selector (default: `"closest tr"`) |
 | `hx_swap` | HTMX swap strategy (default: `"afterend"`) |
+| `href` | Regular link URL. Use instead of `hx_post` for downloads or navigation. `{id}` is replaced with the row's primary key. |
+| `download` | If `true`, adds the `download` attribute to the link (optional, use with `href`) |
+| `target` | Link target (e.g., `"_blank"`) for opening in a new tab (optional, use with `href`) |
 | `class` | CSS class for the button (default: `"btn-outline-primary"`) |
 | `confirm` | If set, shows a confirmation dialog before executing |
 
