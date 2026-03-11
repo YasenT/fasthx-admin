@@ -8,6 +8,7 @@ This replaces Flask-Admin's ModelView with full control over rendering.
 from __future__ import annotations
 
 import csv
+from urllib.parse import quote_plus, urlencode
 import functools
 import io
 import json
@@ -841,7 +842,26 @@ class CRUDView:
             }
 
             if request.headers.get("HX-Request") and request.query_params.get("partial"):
-                return templates.TemplateResponse("partials/table_body.html", context)
+                response = templates.TemplateResponse("partials/table_body.html", context)
+                # Build a clean URL (without partial=1) so the browser URL
+                # reflects the current search/sort/filter state and survives reload.
+                params = []
+                if q:
+                    params.append(("q", q))
+                if sort:
+                    params.append(("sort", sort))
+                if order and order != "asc":
+                    params.append(("order", order))
+                if page > 1:
+                    params.append(("page", str(page)))
+                for key, val in request.query_params.multi_items():
+                    if key.startswith("flt"):
+                        params.append((key, val))
+                clean_url = f"/{view.name}"
+                if params:
+                    clean_url += "?" + urlencode(params)
+                response.headers["HX-Replace-Url"] = clean_url
+                return response
 
             return templates.TemplateResponse(view.list_template, context)
 
