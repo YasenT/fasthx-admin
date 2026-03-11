@@ -1252,6 +1252,7 @@ class Admin:
         extra_templates_dirs: list[str] | None = None,
         settings_admin_groups: list[str] | None = None,
         settings_admin_users: list[str] | None = None,
+        celery_app: Celery | None = None,
     ):
         self.app = app
         self.title = title
@@ -1263,7 +1264,7 @@ class Admin:
         self.ai_chat_enabled = ai_chat
         self.settings_admin_groups = settings_admin_groups
         self.settings_admin_users = settings_admin_users
-        self.celery_app: Celery | None = None
+        self.celery_app = celery_app
 
         # Set up Jinja2 templates (use built-in if not provided)
         if templates is not None:
