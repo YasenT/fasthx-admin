@@ -74,18 +74,39 @@ function showModal(detail) {
     modal.show();
 }
 
-// For non-redirect responses, show the toast after the DOM swap.
-var _lastToastXhr = null;
+// Dedup guard — prevent double-firing from both native event and afterSettle fallback.
+var _toastHandled = null;
+
+// HTMX natively dispatches events from HX-Trigger headers on the body.
+// This is the primary listener — works even when the target element is removed from the DOM.
+document.body.addEventListener('showToast', function (event) {
+    var d = (event.detail && event.detail.value) ? event.detail.value : event.detail;
+    var key = JSON.stringify(d);
+    if (_toastHandled === key) return;
+    _toastHandled = key;
+    setTimeout(function () { _toastHandled = null; }, 200);
+    showToast(d);
+});
+document.body.addEventListener('showModal', function (event) {
+    var d = (event.detail && event.detail.value) ? event.detail.value : event.detail;
+    showModal(d);
+});
+
+// Fallback: manually parse HX-Trigger header after swap settles.
+// Catches edge cases where the native event might not fire as expected.
 document.addEventListener('htmx:afterSettle', function (event) {
     var xhr = event.detail.xhr;
-    if (!xhr || xhr === _lastToastXhr) return;
+    if (!xhr) return;
     var trigger = xhr.getResponseHeader('HX-Trigger');
     if (!trigger) return;
     try {
         var data = JSON.parse(trigger);
         if (data.showToast) {
-            _lastToastXhr = xhr;
-            setTimeout(function () { showToast(data.showToast); }, 50);
+            var key = JSON.stringify(data.showToast);
+            if (_toastHandled === key) return;
+            _toastHandled = key;
+            setTimeout(function () { _toastHandled = null; }, 200);
+            showToast(data.showToast);
         }
         if (data.showModal) {
             showModal(data.showModal);
