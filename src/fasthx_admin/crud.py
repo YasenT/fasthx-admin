@@ -263,7 +263,7 @@ def celery_send_task(model, namespace:str, task_name:str) -> HTMLResponse:
         result = Admin.celery_app.send_task(f"{namespace.lower()}.{task_name}", 
                                                args=[str(model.id)], 
                                                queue=f"{namespace.lower()}")
-        return toast_response(f"Task {result.id} sent to Celery!", type="success")
+        return toast_response(f"Task {result.id} Queued!", type="success")
     except Exception as e:
         return toast_response(f"Failed to send task: {str(e)}", type="danger", status_code=500)
 
@@ -1239,6 +1239,8 @@ class Admin:
         admin.add_view(CustomerView)
     """
 
+    celery_app: Celery | None = None
+
     def __init__(
         self,
         app: FastAPI,
@@ -1264,7 +1266,7 @@ class Admin:
         self.ai_chat_enabled = ai_chat
         self.settings_admin_groups = settings_admin_groups
         self.settings_admin_users = settings_admin_users
-        self.celery_app = celery_app
+        Admin.celery_app = celery_app
 
         # Set up Jinja2 templates (use built-in if not provided)
         if templates is not None:
