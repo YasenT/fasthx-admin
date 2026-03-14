@@ -736,8 +736,8 @@ class CRUDView:
                     value = getattr(item, fk)
                     # Resolve enum values for comparison
                     status_str = value.value if hasattr(value, "value") else str(value)
-                    # HTTP 286 tells HTMX to stop polling
-                    status_code = 286 if terminals and status_str in terminals else 200
+                    # HTTP 286 tells HTMX to stop polling (case-insensitive match)
+                    status_code = 286 if terminals and status_str.lower() in [t.lower() for t in terminals] else 200
                     if fmt:
                         return HTMLResponse(fmt(value, item), status_code=status_code)
                     return templates.TemplateResponse(
