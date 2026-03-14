@@ -32,6 +32,7 @@
 
 /* Chat panel */
 .ai-chat-panel {
+    position: relative;
     width: 500px;
     height: 600px;
     border-radius: 12px;
@@ -41,16 +42,32 @@
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
     background: var(--bs-body-bg);
     border: 1px solid var(--bs-border-color);
-    resize: both;
-    direction: rtl;
     min-width: 320px;
     min-height: 400px;
     max-width: 90vw;
     max-height: 85vh;
 }
 
-.ai-chat-panel > * {
-    direction: ltr;
+/* Top-left resize handle */
+.ai-chat-resize-handle {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 28px;
+    height: 28px;
+    cursor: nw-resize;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.75rem;
+    transform: rotate(90deg);
+    transition: color 0.15s;
+}
+
+.ai-chat-resize-handle:hover {
+    color: rgba(255, 255, 255, 0.9);
 }
 
 /* Header */

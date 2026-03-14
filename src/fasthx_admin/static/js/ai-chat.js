@@ -129,6 +129,39 @@
     });
     resizeObserver.observe(panel);
 
+    // --- Top-left resize handle ---
+    const resizeHandle = document.getElementById('ai-chat-resize-handle');
+    if (resizeHandle) {
+        let isResizing = false;
+        let startX, startY, startWidth, startHeight;
+
+        resizeHandle.addEventListener('mousedown', function (e) {
+            e.preventDefault();
+            isResizing = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            startWidth = panel.offsetWidth;
+            startHeight = panel.offsetHeight;
+            document.body.style.userSelect = 'none';
+        });
+
+        document.addEventListener('mousemove', function (e) {
+            if (!isResizing) return;
+            // Dragging left increases width, dragging up increases height
+            const newWidth = startWidth - (e.clientX - startX);
+            const newHeight = startHeight - (e.clientY - startY);
+            panel.style.width = Math.max(320, Math.min(newWidth, window.innerWidth * 0.9)) + 'px';
+            panel.style.height = Math.max(400, Math.min(newHeight, window.innerHeight * 0.85)) + 'px';
+        });
+
+        document.addEventListener('mouseup', function () {
+            if (isResizing) {
+                isResizing = false;
+                document.body.style.userSelect = '';
+            }
+        });
+    }
+
     // --- Events ---
     toggle.addEventListener('click', function () {
         setExpanded(true);

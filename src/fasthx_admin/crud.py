@@ -726,26 +726,31 @@ class CRUDView:
             # Convert URL pattern: /edges/{id}/status -> /edges/{item_id}/status
             url = config["url"].replace("{id}", "{item_id}")
             formatter = formatters.get(field_key)
+            terminal_states = config.get("terminal_states", [])
 
-            def make_handler(fk, fmt):
+            def make_handler(fk, fmt, terminals):
                 async def handler(request: Request, item_id, db: Session = Depends(get_db)):
                     item = db.query(model).filter(getattr(model, view.pk_field) == item_id).first()
                     if not item:
                         return HTMLResponse("")
                     value = getattr(item, fk)
+                    # Resolve enum values for comparison
+                    status_str = value.value if hasattr(value, "value") else str(value)
+                    # HTTP 286 tells HTMX to stop polling
+                    status_code = 286 if terminals and status_str in terminals else 200
                     if fmt:
-                        return HTMLResponse(fmt(value, item))
-                    status = value.value if hasattr(value, "value") else str(value)
-                    return templates.TemplateResponse("partials/status_cell.html", {
-                        "request": request,
-                        "status": status,
-                    })
+                        return HTMLResponse(fmt(value, item), status_code=status_code)
+                    return templates.TemplateResponse(
+                        "partials/status_cell.html",
+                        {"request": request, "status": status_str},
+                        status_code=status_code,
+                    )
                 handler.__name__ = f"{view.name}_{fk}_poll"
                 return handler
 
             self.router.add_api_route(
                 url,
-                make_handler(field_key, formatter),
+                make_handler(field_key, formatter, terminal_states),
                 methods=["GET"],
                 response_class=HTMLResponse,
             )

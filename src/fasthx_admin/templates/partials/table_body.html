@@ -4,9 +4,11 @@
     <td>
         {% set cell = row.cells[col.key] %}
         {% if cell.htmx %}
-        <span hx-get="{{ cell.htmx.url | replace('{id}', row._id|string) }}"
+        {% set raw_str = cell.raw.value if cell.raw is not none and cell.raw.value is defined else (cell.raw|string if cell.raw is not none else '') %}
+        {% set is_terminal = cell.htmx.terminal_states is defined and raw_str in cell.htmx.terminal_states %}
+        <span {% if not is_terminal %}hx-get="{{ cell.htmx.url | replace('{id}', row._id|string) }}"
               hx-trigger="{{ cell.htmx.trigger | default('every 3s') }}"
-              hx-swap="innerHTML">
+              hx-swap="innerHTML"{% endif %}>
             {{ (cell.formatted if cell.formatted is not none else '') | safe }}
         </span>
         {% else %}
