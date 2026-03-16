@@ -339,6 +339,22 @@ def _build_filter_defs(view, model, db: Session = None) -> list:
     return defs
 
 
+def _resolve_dotted(item, key):
+    """Resolve a possibly dot-separated attribute path on *item*.
+
+    For plain keys (no dot) this behaves exactly like ``getattr(item, key)``.
+    For dotted keys like ``"palo1.hostname"`` it traverses the chain:
+    ``item.palo1.hostname``, returning ``None`` if any intermediate is ``None``.
+    """
+    parts = key.split(".")
+    obj = item
+    for part in parts:
+        if obj is None:
+            return None
+        obj = getattr(obj, part, None)
+    return obj
+
+
 def _safe_build_query(view, db, q, sort, order, active_filters):
     """Call ``view._build_query`` with filters, falling back if the subclass
     overrides ``_build_query`` without a *filters* parameter."""
@@ -531,6 +547,33 @@ class CRUDView:
                     "type": col_type,
                     "sortable": self.column_sortable is None or col_obj.key in (self.column_sortable or []),
                 })
+            elif "." in key:
+                # Dot-notation: e.g. "palo1.hostname" → traverse relationship
+                parts = key.split(".")
+                rel_key = parts[0]
+                rel = self.relationships.get(rel_key)
+                if rel is not None:
+                    # Walk the chain to resolve the final column type
+                    related_mapper = rel.mapper
+                    col_type = "String"
+                    for attr in parts[1:]:
+                        rel_col = related_mapper.columns.get(attr)
+                        if rel_col is not None:
+                            col_type = type(rel_col.type).__name__
+                        else:
+                            # Could be a nested relationship; try to keep walking
+                            nested_rel = {r.key: r for r in related_mapper.relationships}.get(attr)
+                            if nested_rel is not None:
+                                related_mapper = nested_rel.mapper
+                            else:
+                                break
+                    default_label = key.replace(".", " ").replace("_", " ").title()
+                    self.columns_meta.append({
+                        "key": key,
+                        "label": self.column_labels.get(key, self.column_labels.get(rel_key, default_label)),
+                        "type": col_type,
+                        "sortable": False,  # relationship traversal not sortable at DB level
+                    })
 
         # Build form field metadata (ordered by form_columns)
         self.form_fields = []
@@ -830,7 +873,7 @@ class CRUDView:
                 row = {"_obj": item, "_id": getattr(item, view.pk_field), "cells": {}}
                 for col_meta in view.columns_meta:
                     key = col_meta["key"]
-                    value = getattr(item, key)
+                    value = _resolve_dotted(item, key)
                     if key in view.column_formatters:
                         formatted = view.column_formatters[key](value, item)
                     else:
@@ -912,8 +955,10 @@ class CRUDView:
                 for item in items:
                     row = []
                     for key in col_keys:
-                        value = getattr(item, key, "")
-                        if hasattr(value, "value"):
+                        value = _resolve_dotted(item, key)
+                        if value is None:
+                            value = ""
+                        elif hasattr(value, "value"):
                             value = value.value
                         if value is None:
                             value = ""
@@ -1031,7 +1076,7 @@ class CRUDView:
             fields = []
             for col_meta in view.columns_meta:
                 key = col_meta["key"]
-                value = getattr(item, key)
+                value = _resolve_dotted(item, key)
                 if key in view.column_formatters:
                     formatted = view.column_formatters[key](value, item)
                 else:
