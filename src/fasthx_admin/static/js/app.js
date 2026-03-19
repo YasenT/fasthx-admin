@@ -329,10 +329,6 @@ document.addEventListener('htmx:afterSettle', function (event) {
         cleanupTomSelects();
         initTomSelect();
         initDependsOn();
-        // Re-initialize Bootstrap dropdowns after hx-boost page swaps
-        document.querySelectorAll('[data-bs-toggle="dropdown"]').forEach(function (el) {
-            bootstrap.Dropdown.getOrCreateInstance(el);
-        });
     }
 });
 
