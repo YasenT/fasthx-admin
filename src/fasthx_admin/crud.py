@@ -117,6 +117,7 @@ def toast_response(
     title: str | None = None,
     redirect: str | None = None,
     status_code: int = 200,
+    request=None,
 ) -> HTMLResponse:
     """Return an HTMLResponse that triggers a toast notification via HTMX.
 
@@ -125,7 +126,7 @@ def toast_response(
         @CRUDView.endpoint("/{name}/{item_id}/deploy", methods=["POST"])
         async def deploy(self, ...):
             ...
-            return toast_response("Deployment started!", type="success", redirect=f"/{self.name}")
+            return toast_response("Deployment started!", type="success", redirect=f"/{self.name}", request=request)
 
     Args:
         message: The toast message text.
@@ -133,6 +134,8 @@ def toast_response(
         title: Optional title (defaults to capitalised type).
         redirect: Optional URL — adds HX-Redirect header for page navigation after toast.
         status_code: HTTP status code (default 200).
+        request: Optional FastAPI Request — when provided, uses the Referer header
+            to preserve query params (search, filters, sort) on redirect.
     """
     import urllib.parse
     toast_data: Dict[str, Any] = {"message": message, "type": type}
@@ -140,6 +143,17 @@ def toast_response(
         toast_data["title"] = title
     headers: Dict[str, str] = {}
     if redirect:
+        # When a request is provided, use the Referer header to preserve
+        # query params (search, filters, pagination) on redirect.
+        if request:
+            referer = request.headers.get("referer")
+            if referer:
+                from urllib.parse import urlparse
+                ref_parsed = urlparse(referer)
+                redirect_parsed = urlparse(redirect)
+                # Only use Referer if it matches the same path as the redirect
+                if ref_parsed.path.rstrip("/") == redirect_parsed.path.rstrip("/") and ref_parsed.query:
+                    redirect = referer if "://" not in redirect else ref_parsed.path + "?" + ref_parsed.query
         # When redirecting, pass the toast as a cookie so it survives the
         # full page navigation triggered by HX-Redirect.
         headers["HX-Redirect"] = redirect
@@ -1239,6 +1253,12 @@ class CRUDView:
                     value = col.type.enum_class(value)
 
                 setattr(item, key, value)
+            else:
+                # Unchecked checkboxes are not submitted in HTML forms,
+                # so missing boolean fields must be explicitly set to False.
+                col = mapper.columns.get(key)
+                if col is not None and type(col.type).__name__.upper() == "BOOLEAN":
+                    setattr(item, key, False)
 
     def validate(self, item, form_data, is_new: bool):
         """Override to add custom validation before create/edit commits.

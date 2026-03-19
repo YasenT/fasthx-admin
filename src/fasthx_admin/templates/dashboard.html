@@ -18,7 +18,11 @@
                             <div class="summary-label">{{ card.label }}</div>
                         </div>
                         <div class="summary-icon {{ card.bg or 'bg-primary-subtle' }}">
+                            {% if card.icon_img %}
+                            <span class="fs-4 {{ card.icon_color or 'text-primary' }}" style="display:inline-block;width:{{ card.icon_img_size or '1.5em' }};height:{{ card.icon_img_size or '1.5em' }};background-color:currentColor;-webkit-mask-image:url('{{ card.icon_img }}');mask-image:url('{{ card.icon_img }}');-webkit-mask-size:contain;mask-size:contain;-webkit-mask-repeat:no-repeat;mask-repeat:no-repeat;-webkit-mask-position:center;mask-position:center;"></span>
+                            {% else %}
                             <i class="bi bi-{{ card.icon }} fs-4 {{ card.icon_color or 'text-primary' }}"></i>
+                            {% endif %}
                         </div>
                     </div>
                 </div>

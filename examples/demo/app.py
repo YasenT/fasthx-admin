@@ -240,6 +240,7 @@ class OrchestratorView(CRUDView):
             "hx_target": "closest tr",
             "hx_swap": "outerHTML",
             "class": "btn-outline-primary",
+            "loading": True,
         },
     ]
     form_sections = {

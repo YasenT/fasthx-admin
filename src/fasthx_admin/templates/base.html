@@ -114,6 +114,11 @@
         </div>
     </div>
 
+    <!-- Loading overlay for row actions -->
+    <div id="loading-overlay" style="display:none; position:fixed; inset:0; z-index:2000; background:rgba(0,0,0,0.35); align-items:center; justify-content:center;">
+        <div class="spinner-border text-light" style="width:3rem; height:3rem;" role="status"></div>
+    </div>
+
     <!-- Toast container -->
     <div id="toast-container" class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1090;"></div>
 
@@ -155,6 +160,33 @@
                     el.classList.toggle('collapsed', state[cat]);
                 }
                 syncCategoryIcon(cat, el.classList.contains('collapsed'));
+            });
+        })();
+
+        // Loading overlay for row actions with data-loading="true"
+        (function() {
+            var overlay = document.getElementById('loading-overlay');
+            var loadingActive = false;
+            // Show overlay on click, before HTMX or Bootstrap can remove the element
+            document.body.addEventListener('click', function(e) {
+                var btn = e.target.closest('[data-loading="true"]');
+                if (btn) {
+                    loadingActive = true;
+                    overlay.style.display = 'flex';
+                }
+            });
+            // Hide overlay when any HTMX request completes
+            document.body.addEventListener('htmx:afterRequest', function() {
+                if (loadingActive) {
+                    loadingActive = false;
+                    overlay.style.display = 'none';
+                }
+            });
+            document.body.addEventListener('htmx:responseError', function() {
+                if (loadingActive) {
+                    loadingActive = false;
+                    overlay.style.display = 'none';
+                }
             });
         })();
 

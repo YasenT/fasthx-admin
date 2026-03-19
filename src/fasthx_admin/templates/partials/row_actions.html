@@ -36,6 +36,9 @@
                     {% endif %}
                     hx-target="{{ action.get('hx_target', 'closest tr') }}"
                     hx-swap="{{ action.get('hx_swap', 'afterend') }}"
+                    {% if action.get('loading') %}
+                    data-loading="true"
+                    {% endif %}
                     {% if action.get('confirm') %}
                     hx-confirm="{{ action.confirm }}"
                     {% endif %}>
