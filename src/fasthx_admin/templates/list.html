@@ -101,6 +101,9 @@
         <table class="table table-hover mb-0">
             <thead>
                 <tr>
+                    {% if row_actions %}
+                    <th class="text-start" style="width: 1px; white-space: nowrap;">Actions</th>
+                    {% endif %}
                     {% for col in columns %}
                     <th>
                         {% if col.sortable %}
@@ -116,9 +119,6 @@
                         {% endif %}
                     </th>
                     {% endfor %}
-                    {% if row_actions %}
-                    <th class="text-end">Actions</th>
-                    {% endif %}
                 </tr>
             </thead>
             <tbody id="table-body">

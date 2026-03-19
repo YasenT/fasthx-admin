@@ -1,5 +1,10 @@
 {% for row in rows %}
 <tr>
+    {% if row_actions %}
+    <td class="text-start" style="white-space: nowrap;">
+    {% include "partials/row_actions.html" %}
+    </td>
+    {% endif %}
     {% for col in columns %}
     <td>
         {% set cell = row.cells[col.key] %}
@@ -17,11 +22,6 @@
         {% endif %}
     </td>
     {% endfor %}
-    {% if row_actions %}
-    <td class="text-end">
-        {% include "partials/row_actions.html" %}
-    </td>
-    {% endif %}
 </tr>
 {% else %}
 <tr>
