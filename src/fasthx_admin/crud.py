@@ -480,6 +480,7 @@ class CRUDView:
     htmx_columns = None
     column_filters = None
     export_types = None
+    progress_redis_url = None
     list_template = "list.html"
     create_template = "form.html"
     edit_template = "form.html"
@@ -631,6 +632,7 @@ class CRUDView:
 
         self.router = APIRouter()
         self._setup_htmx_polling_routes()
+        self._setup_progress_route()
         self._setup_ajax_select_routes()
         self._setup_decorated_endpoints()
         self.setup_endpoints()
@@ -768,6 +770,98 @@ class CRUDView:
     def get_colspan(self) -> int:
         """Calculate table colspan (columns + actions column if present)."""
         return len(self.columns_meta) + (1 if self.row_actions else 0)
+
+    def progress_response(self, request: Request, item_id, item=None, progress: int = 0, status: str = "Starting..."):
+        """Return an HTMLResponse rendering the progress bar row.
+
+        Call this from your action endpoint to insert the initial progress bar.
+        The auto-registered progress polling endpoint handles subsequent updates.
+
+        If ``item`` is provided and ``htmx_columns`` are configured, OOB swaps
+        are automatically appended to restart polling on those columns.
+        """
+        progress_html = self.templates.TemplateResponse("partials/progress_bar.html", {
+            "request": request,
+            "view_name": self.name,
+            "item_id": item_id,
+            "progress": progress,
+            "status": status,
+            "colspan": self.get_colspan(),
+        }).body.decode()
+
+        # Auto-generate OOB swaps for any htmx_columns to restart their polling
+        if item is not None and self.htmx_columns:
+            formatters = self.column_formatters or {}
+            for col_key, config in self.htmx_columns.items():
+                value = getattr(item, col_key, None)
+                fmt = formatters.get(col_key)
+                content = fmt(value, item) if fmt else (value.value if hasattr(value, "value") else str(value or ""))
+                url = config["url"].replace("{id}", str(item_id))
+                trigger = config.get("trigger", "every 3s")
+                progress_html += (
+                    f'<span id="htmx-{col_key}-{item_id}"'
+                    f' hx-get="{url}"'
+                    f' hx-trigger="load, {trigger}"'
+                    f' hx-swap="innerHTML"'
+                    f' hx-swap-oob="true">'
+                    f'{content}</span>'
+                )
+
+        return HTMLResponse(progress_html)
+
+    def _setup_progress_route(self):
+        """Auto-register GET /{name}/{item_id}/progress when any row_action has progress=True."""
+        has_progress = any(a.get("progress") for a in self.row_actions)
+        if not has_progress or not self.progress_redis_url:
+            return
+
+        try:
+            import redis as redis_lib
+        except ImportError:
+            raise ImportError(
+                "redis is required for progress bar support. "
+                "Install it with: pip install redis"
+            )
+
+        view = self
+        redis_url = self.progress_redis_url
+
+        async def progress_handler(request: Request, item_id):
+            try:
+                r = redis_lib.Redis.from_url(redis_url, decode_responses=True)
+                raw = r.get(f"{view.name}:{item_id}:progress")
+            except Exception:
+                raw = None
+
+            if raw is None:
+                progress_val = 0
+                status = "Waiting..."
+            elif raw == "Error":
+                progress_val = 100
+                status = "Error"
+            else:
+                try:
+                    progress_val = int(raw)
+                except (ValueError, TypeError):
+                    progress_val = 0
+                status = "Complete" if progress_val >= 100 else "Deploying..."
+
+            return view.templates.TemplateResponse("partials/progress_bar.html", {
+                "request": request,
+                "view_name": view.name,
+                "item_id": item_id,
+                "progress": progress_val,
+                "status": status,
+                "colspan": view.get_colspan(),
+            })
+
+        progress_handler.__name__ = f"{self.name}_progress_poll"
+        self.router.add_api_route(
+            f"/{self.name}/{{item_id}}/progress",
+            progress_handler,
+            methods=["GET"],
+            response_class=HTMLResponse,
+        )
 
     def render_row(self, request, item):
         """Render a single <tr> for the given item via the table_body partial."""
