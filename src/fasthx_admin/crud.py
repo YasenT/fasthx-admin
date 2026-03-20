@@ -817,11 +817,7 @@ class CRUDView:
                     status_code = 286 if terminals and status_str.lower() in [t.lower() for t in terminals] else 200
                     if fmt:
                         return HTMLResponse(fmt(value, item), status_code=status_code)
-                    return templates.TemplateResponse(
-                        "partials/status_cell.html",
-                        {"request": request, "status": status_str},
-                        status_code=status_code,
-                    )
+                    return HTMLResponse(status_str, status_code=status_code)
                 handler.__name__ = f"{view.name}_{fk}_poll"
                 return handler
 
