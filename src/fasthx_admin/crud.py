@@ -769,6 +769,25 @@ class CRUDView:
         """Calculate table colspan (columns + actions column if present)."""
         return len(self.columns_meta) + (1 if self.row_actions else 0)
 
+    def render_row(self, request, item):
+        """Render a single <tr> for the given item via the table_body partial."""
+        row = {"_obj": item, "_id": getattr(item, self.pk_field), "cells": {}}
+        for col_meta in self.columns_meta:
+            key = col_meta["key"]
+            value = _resolve_dotted(item, key)
+            formatted = self.column_formatters[key](value, item) if key in self.column_formatters else value
+            row["cells"][key] = {
+                "raw": value,
+                "formatted": formatted,
+                "htmx": self.htmx_columns.get(key),
+            }
+        return self.templates.TemplateResponse("partials/table_body.html", {
+            "request": request,
+            "rows": [row],
+            "columns": self.columns_meta,
+            "row_actions": self.row_actions,
+        })
+
     def _setup_htmx_polling_routes(self):
         """Auto-register GET endpoints for each htmx_columns entry."""
         if not self.htmx_columns:
