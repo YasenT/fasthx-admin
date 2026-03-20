@@ -783,6 +783,7 @@ class CRUDView:
             }
         return self.templates.TemplateResponse("partials/table_body.html", {
             "request": request,
+            "view": self,
             "rows": [row],
             "columns": self.columns_meta,
             "row_actions": self.row_actions,
