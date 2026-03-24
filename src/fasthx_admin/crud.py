@@ -1155,6 +1155,7 @@ class CRUDView:
             try:
                 view._apply_form_data(item, form_data)
                 view.validate(item, form_data, is_new=True)
+                view.on_model_change(item, form_data, is_new=True, db=db)
                 db.add(item)
                 db.commit()
             except ValidationError as e:
@@ -1168,6 +1169,7 @@ class CRUDView:
                 error_msg = str(e) or "An unexpected error occurred."
             else:
                 error_msg = None
+                view.after_model_change(item, form_data, is_new=True, db=db)
             if error_msg:
                 form_fields = view._prepare_form_fields(db, item)
                 return templates.TemplateResponse(view.create_template, {
@@ -1257,6 +1259,7 @@ class CRUDView:
             try:
                 view._apply_form_data(item, form_data)
                 view.validate(item, form_data, is_new=False)
+                view.on_model_change(item, form_data, is_new=False, db=db)
                 db.commit()
             except ValidationError as e:
                 db.rollback()
@@ -1269,6 +1272,7 @@ class CRUDView:
                 error_msg = str(e) or "An unexpected error occurred."
             else:
                 error_msg = None
+                view.after_model_change(item, form_data, is_new=False, db=db)
             if error_msg:
                 form_fields = view._prepare_form_fields(db, item)
                 return templates.TemplateResponse(view.edit_template, {
@@ -1299,8 +1303,21 @@ class CRUDView:
 
             item = db.query(model).filter(getattr(model, view.pk_field) == item_id).first()
             if item:
-                db.delete(item)
-                db.commit()
+                try:
+                    view.on_model_delete(item, db=db)
+                    db.delete(item)
+                    db.commit()
+                except ValidationError as e:
+                    db.rollback()
+                    if request.headers.get("HX-Request"):
+                        return HTMLResponse("", headers={
+                            "HX-Trigger": json.dumps({"showToast": {
+                                "message": e.message, "type": "danger", "title": "Error",
+                            }}),
+                        })
+                    return RedirectResponse(f"/{view.name}", status_code=303)
+                else:
+                    view.after_model_delete(item, db=db)
 
             if request.headers.get("HX-Request"):
                 return HTMLResponse("")
@@ -1387,6 +1404,54 @@ class CRUDView:
                     raise ValidationError("Hostname is required")
                 if is_new and self.model.query.filter_by(hostname=item.hostname).first():
                     raise ValidationError("Hostname already exists")
+        """
+        pass
+
+    def on_model_change(self, item, form_data, is_new: bool, db: Session):
+        """Called before a model is committed on create or edit.
+
+        Runs after ``validate()`` succeeds and before ``db.commit()``.
+        Raise ``ValidationError`` to abort the save.
+
+        Args:
+            item: The model instance with form data applied.
+            form_data: The raw form data dict.
+            is_new: True for create, False for edit.
+            db: The SQLAlchemy session.
+        """
+        pass
+
+    def after_model_change(self, item, form_data, is_new: bool, db: Session):
+        """Called after a model is successfully committed on create or edit.
+
+        Use this for side effects like audit logging, cache invalidation,
+        or sending notifications.
+
+        Args:
+            item: The model instance that was saved.
+            form_data: The raw form data dict.
+            is_new: True for create, False for edit.
+            db: The SQLAlchemy session.
+        """
+        pass
+
+    def on_model_delete(self, item, db: Session):
+        """Called before a model is deleted and committed.
+
+        Raise ``ValidationError`` to abort the delete.
+
+        Args:
+            item: The model instance about to be deleted.
+            db: The SQLAlchemy session.
+        """
+        pass
+
+    def after_model_delete(self, item, db: Session):
+        """Called after a model is successfully deleted and committed.
+
+        Args:
+            item: The model instance that was deleted.
+            db: The SQLAlchemy session.
         """
         pass
 

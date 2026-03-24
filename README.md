@@ -65,6 +65,7 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
 - [Toast Notifications](#toast-notifications)
 - [Modals](#modals)
 - [Validation](#validation)
+- [Model Lifecycle Hooks](#model-lifecycle-hooks)
 - [Progress Bar](#progress-bar)
 - [Authentication](#authentication)
 - [AI Chat (Optional)](#ai-chat-optional)
@@ -1123,6 +1124,75 @@ class OfferingView(CRUDView):
 
 ---
 
+## Model Lifecycle Hooks
+
+CRUDView provides lifecycle hooks that run before and after creates, edits, and deletes. These are useful for audit logging, cache invalidation, sending notifications, syncing external systems, or any side effect that should happen around model changes.
+
+| Hook | When it runs | Can abort? |
+|---|---|---|
+| `on_model_change(item, form_data, is_new, db)` | After `validate()`, before `db.commit()` | Yes — raise `ValidationError` |
+| `after_model_change(item, form_data, is_new, db)` | After successful commit | No |
+| `on_model_delete(item, db)` | Before `db.delete()` and `db.commit()` | Yes — raise `ValidationError` |
+| `after_model_delete(item, db)` | After successful delete commit | No |
+
+### Example: Audit logging
+
+```python
+from fasthx_admin import CRUDView
+
+class CustomerView(CRUDView):
+    model = Customer
+
+    def after_model_change(self, item, form_data, is_new, db):
+        action = "created" if is_new else "updated"
+        db.add(AuditLog(entity="customer", entity_id=item.id, action=action))
+        db.commit()
+
+    def after_model_delete(self, item, db):
+        db.add(AuditLog(entity="customer", entity_id=item.id, action="deleted"))
+        db.commit()
+```
+
+### Example: Prevent deletion
+
+```python
+class OrderView(CRUDView):
+    model = Order
+
+    def on_model_delete(self, item, db):
+        if item.status == "shipped":
+            raise ValidationError("Cannot delete a shipped order")
+```
+
+### Example: Sync external system on change
+
+```python
+class ServerView(CRUDView):
+    model = Server
+
+    def on_model_change(self, item, form_data, is_new, db):
+        if not is_new and item.ipaddress != form_data.get("ipaddress"):
+            # Update DNS before commit
+            update_dns_record(item.hostname, form_data.get("ipaddress"))
+```
+
+**How it fits in the save flow:**
+
+1. User submits create or edit form
+2. `_apply_form_data()` sets values on the model instance
+3. `validate()` runs — raise `ValidationError` to abort
+4. `on_model_change()` runs — raise `ValidationError` to abort
+5. `db.commit()`
+6. `after_model_change()` runs
+
+**Delete flow:**
+
+1. `on_model_delete()` runs — raise `ValidationError` to abort
+2. `db.delete()` + `db.commit()`
+3. `after_model_delete()` runs
+
+---
+
 ## Progress Bar
 
 fasthx-admin includes a built-in Redis-backed progress bar that uses HTMX auto-polling to show real-time task progress. The progress bar appears inline in the list table, polls every 2 seconds, and stops automatically on completion or error.
@@ -1923,6 +1993,10 @@ fasthx-admin is designed as a drop-in conceptual replacement for Flask-Admin. He
 | `form_args` | `form_widget_overrides` | Renamed, supports HTMX attrs |
 | `form_ajax_refs` | `form_ajax_refs` | Same concept; uses HTMX instead of Select2 |
 | `column_extra_row_actions` | `row_actions` | List of dicts with HTMX attrs |
+| `on_model_change(form, model, is_created)` | `on_model_change(item, form_data, is_new, db)` | Same concept; uses form_data dict instead of WTForms |
+| `after_model_change(form, model, is_created)` | `after_model_change(item, form_data, is_new, db)` | Same concept |
+| `on_model_delete(model)` | `on_model_delete(item, db)` | Same concept; db session passed explicitly |
+| `after_model_delete(model)` | `after_model_delete(item, db)` | Same concept |
 | `column_filters` | `column_filters` | List of column names for filter dropdowns |
 | `column_export_list` | `export_types` | List of format strings (`["csv", "xlsx"]`) |
 | `@expose()` custom endpoints | `setup_endpoints()` override | Define on `self.router` |
