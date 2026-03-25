@@ -130,8 +130,9 @@ POST /{name}/create or /{name}/{id}/edit
   → Parse multipart form data
   → Instantiate model (create) or fetch existing (edit)
   → _apply_form_data(item, form_data) → type coercion per column type
-  → validate(item, form_data, is_new) → user override hook, raises ValidationError
+  → on_model_change(item, form_data, is_new, db, request) → validate + mutate, raises ValidationError
   → db.add() + db.commit()
+  → after_model_change(item, form_data, is_new, db, request) → side effects
   → Success: HX-Redirect to list view
   → ValidationError: rollback, re-render form with error toast
   → IntegrityError: rollback, generic error toast
@@ -172,7 +173,10 @@ These are the sanctioned ways users customize behavior. New features should inte
 
 | Mechanism | Purpose | How |
 |-----------|---------|-----|
-| `validate(item, form_data, is_new)` | Custom validation before save | Override method, raise `ValidationError` |
+| `on_model_change(item, form_data, is_new, db, request)` | Validate + mutate before save | Override method, raise `ValidationError` to abort |
+| `after_model_change(item, form_data, is_new, db, request)` | Side effects after save | Override method |
+| `on_model_delete(item, db)` | Pre-delete hook | Override method, raise `ValidationError` to abort |
+| `after_model_delete(item, db)` | Post-delete hook | Override method |
 | `setup_endpoints()` | Register custom routes | Override method, add routes to `self.router` |
 | `@CRUDView.endpoint()` | Declarative custom endpoints | Decorator on view methods |
 | `column_formatters` | Custom cell rendering | `Dict[col, callable(value, item) -> str]` |

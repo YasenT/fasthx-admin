@@ -1087,7 +1087,7 @@ showModal({ size: 'modal-lg' });    // Open with large size
 
 ## Validation
 
-Override the `validate()` method on a CRUDView to add custom validation to create and edit forms. When validation fails, the form re-renders with the user's values preserved and a danger toast is shown.
+Raise `ValidationError` inside `on_model_change()` to abort a create or edit. The form re-renders with the user's values preserved and a danger toast shows the error message.
 
 ```python
 from fasthx_admin import CRUDView, ValidationError
@@ -1095,31 +1095,25 @@ from fasthx_admin import CRUDView, ValidationError
 class CustomerView(CRUDView):
     model = Customer
 
-    def validate(self, item, form_data, is_new):
+    def on_model_change(self, item, form_data, is_new, db, request=None):
         if not item.name or len(item.name.strip()) < 2:
             raise ValidationError("Customer name must be at least 2 characters")
         if is_new and not item.sid:
             raise ValidationError("SID is required for new customers")
 ```
 
-**How it works:**
-
-1. User submits the create or edit form
-2. `_apply_form_data()` sets values on the model instance
-3. `validate(item, form_data, is_new)` is called
-4. If `ValidationError` is raised, the form re-renders with values intact and a toast shows the error
-5. If no error, the item is saved and the user is redirected
-
-You can also raise `ValidationError` from `_apply_form_data()` if you need to validate during data transformation:
+Since `on_model_change` receives `db`, you can query related models for cross-table validation:
 
 ```python
 class OfferingView(CRUDView):
     model = Offering
 
-    def _apply_form_data(self, item, form_data):
-        super()._apply_form_data(item, form_data)
-        if item.serverid and not item.ipaddress:
-            raise ValidationError("IP address is required when a server is selected")
+    def on_model_change(self, item, form_data, is_new, db, request=None):
+        product = db.query(Product).get(item.productid) if item.productid else None
+        if product and product.name == "Fortigate":
+            license_obj = db.query(VnfLicenses).get(item.vnflicensesid)
+            if license_obj and "Forti" not in license_obj.license:
+                raise ValidationError("Please select a Forti license")
 ```
 
 ---
@@ -1130,12 +1124,16 @@ CRUDView provides lifecycle hooks that run before and after creates, edits, and 
 
 | Hook | When it runs | Can abort? |
 |---|---|---|
-| `on_model_change(item, form_data, is_new, db, request)` | After `validate()`, before `db.commit()` | Yes — raise `ValidationError` |
+| `on_model_change(item, form_data, is_new, db, request)` | After `_apply_form_data()`, before `db.commit()` | Yes — raise `ValidationError` |
 | `after_model_change(item, form_data, is_new, db, request)` | After successful commit | No |
 | `on_model_delete(item, db)` | Before `db.delete()` and `db.commit()` | Yes — raise `ValidationError` |
 | `after_model_delete(item, db)` | After successful delete commit | No |
 
-> **New in 0.5.2:** `on_model_change` and `after_model_change` now receive the `request` parameter, giving access to the current user session and request context inside lifecycle hooks. The parameter defaults to `None` for backward compatibility.
+Use `on_model_change` for both validation and mutation before save. There is no separate `validate()` hook — keep it simple with one hook before commit and one after.
+
+> **New in 0.5.2:** `on_model_change` and `after_model_change` receive the `request` parameter for access to the current user session and request context. Defaults to `None` for backward compatibility.
+>
+> **New in 0.5.3:** Removed the separate `validate()` hook. All validation now belongs in `on_model_change()`, which has full access to `db` and `request`.
 
 ### Example: Audit logging
 
@@ -1165,6 +1163,31 @@ class OrderView(CRUDView):
     def on_model_delete(self, item, db):
         if item.status == "shipped":
             raise ValidationError("Cannot delete a shipped order")
+```
+
+### Example: Validation
+
+```python
+from fasthx_admin import CRUDView, ValidationError
+
+class OfferingView(CRUDView):
+    model = Offering
+
+    def on_model_change(self, item, form_data, is_new, db, request=None):
+        # Validate
+        if not item.hostname:
+            raise ValidationError("Hostname is required")
+
+        product = db.query(Product).get(item.productid)
+        if product and product.name == "Fortigate":
+            license_obj = db.query(VnfLicenses).get(item.vnflicensesid)
+            if license_obj and "Forti" not in license_obj.license:
+                raise ValidationError("Please select a Forti license")
+
+        # Mutate
+        if is_new and item.serverid:
+            server = db.query(Server).get(item.serverid)
+            item.ipaddress = server.getnextip(serverid=server.id)
 ```
 
 ### Example: Set current user on create
@@ -1197,10 +1220,9 @@ class ServerView(CRUDView):
 
 1. User submits create or edit form
 2. `_apply_form_data()` sets values on the model instance
-3. `validate()` runs — raise `ValidationError` to abort
-4. `on_model_change()` runs — raise `ValidationError` to abort
-5. `db.commit()`
-6. `after_model_change()` runs
+3. `on_model_change()` runs — validate and mutate, raise `ValidationError` to abort
+4. `db.commit()`
+5. `after_model_change()` runs
 
 **Delete flow:**
 
@@ -2010,7 +2032,7 @@ fasthx-admin is designed as a drop-in conceptual replacement for Flask-Admin. He
 | `form_args` | `form_widget_overrides` | Renamed, supports HTMX attrs |
 | `form_ajax_refs` | `form_ajax_refs` | Same concept; uses HTMX instead of Select2 |
 | `column_extra_row_actions` | `row_actions` | List of dicts with HTMX attrs |
-| `on_model_change(form, model, is_created)` | `on_model_change(item, form_data, is_new, db, request)` | Same concept; uses form_data dict instead of WTForms, includes request |
+| `on_model_change(form, model, is_created)` | `on_model_change(item, form_data, is_new, db, request)` | Handles both validation and mutation; uses form_data dict instead of WTForms |
 | `after_model_change(form, model, is_created)` | `after_model_change(item, form_data, is_new, db, request)` | Same concept; includes request for user context |
 | `on_model_delete(model)` | `on_model_delete(item, db)` | Same concept; db session passed explicitly |
 | `after_model_delete(model)` | `after_model_delete(item, db)` | Same concept |

@@ -92,17 +92,17 @@ _model_registry: Dict[str, Any] = {}
 
 
 class ValidationError(Exception):
-    """Raised from ``CRUDView.validate`` or ``_apply_form_data`` to abort a create/edit.
+    """Raised from ``CRUDView.on_model_change`` to abort a create/edit.
 
     Usage::
 
         class MyView(CRUDView):
             model = MyModel
 
-            def validate(self, item, form_data, is_new):
-                if not form_data.get("hostname"):
+            def on_model_change(self, item, form_data, is_new, db, request=None):
+                if not item.hostname:
                     raise ValidationError("Hostname is required")
-                if not form_data.get("hostname").endswith(".local"):
+                if not item.hostname.endswith(".local"):
                     raise ValidationError("Hostname must end with .local")
     """
 
@@ -1154,7 +1154,6 @@ class CRUDView:
             item = model()
             try:
                 view._apply_form_data(item, form_data)
-                view.validate(item, form_data, is_new=True)
                 view.on_model_change(item, form_data, is_new=True, db=db, request=request)
                 db.add(item)
                 db.commit()
@@ -1258,7 +1257,6 @@ class CRUDView:
             form_data = await request.form()
             try:
                 view._apply_form_data(item, form_data)
-                view.validate(item, form_data, is_new=False)
                 view.on_model_change(item, form_data, is_new=False, db=db, request=request)
                 db.commit()
             except ValidationError as e:
@@ -1387,30 +1385,10 @@ class CRUDView:
                 if col is not None and type(col.type).__name__.upper() == "BOOLEAN":
                     setattr(item, key, False)
 
-    def validate(self, item, form_data, is_new: bool):
-        """Override to add custom validation before create/edit commits.
-
-        Raise ``ValidationError`` to abort the save and show a toast to the user.
-
-        Args:
-            item: The model instance (already has form data applied).
-            form_data: The raw form data dict.
-            is_new: True for create, False for edit.
-
-        Example::
-
-            def validate(self, item, form_data, is_new):
-                if not item.hostname:
-                    raise ValidationError("Hostname is required")
-                if is_new and self.model.query.filter_by(hostname=item.hostname).first():
-                    raise ValidationError("Hostname already exists")
-        """
-        pass
-
     def on_model_change(self, item, form_data, is_new: bool, db: Session, request: Request = None):
         """Called before a model is committed on create or edit.
 
-        Runs after ``validate()`` succeeds and before ``db.commit()``.
+        Use for validation and/or mutation before ``db.commit()``.
         Raise ``ValidationError`` to abort the save.
 
         Args:
