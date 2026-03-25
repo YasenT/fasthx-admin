@@ -1130,10 +1130,12 @@ CRUDView provides lifecycle hooks that run before and after creates, edits, and 
 
 | Hook | When it runs | Can abort? |
 |---|---|---|
-| `on_model_change(item, form_data, is_new, db)` | After `validate()`, before `db.commit()` | Yes — raise `ValidationError` |
-| `after_model_change(item, form_data, is_new, db)` | After successful commit | No |
+| `on_model_change(item, form_data, is_new, db, request)` | After `validate()`, before `db.commit()` | Yes — raise `ValidationError` |
+| `after_model_change(item, form_data, is_new, db, request)` | After successful commit | No |
 | `on_model_delete(item, db)` | Before `db.delete()` and `db.commit()` | Yes — raise `ValidationError` |
 | `after_model_delete(item, db)` | After successful delete commit | No |
+
+> **New in 0.5.2:** `on_model_change` and `after_model_change` now receive the `request` parameter, giving access to the current user session and request context inside lifecycle hooks. The parameter defaults to `None` for backward compatibility.
 
 ### Example: Audit logging
 
@@ -1143,9 +1145,10 @@ from fasthx_admin import CRUDView
 class CustomerView(CRUDView):
     model = Customer
 
-    def after_model_change(self, item, form_data, is_new, db):
+    def after_model_change(self, item, form_data, is_new, db, request=None):
+        user = get_current_user(request) or {}
         action = "created" if is_new else "updated"
-        db.add(AuditLog(entity="customer", entity_id=item.id, action=action))
+        db.add(AuditLog(entity="customer", entity_id=item.id, action=action, user=user.get("username")))
         db.commit()
 
     def after_model_delete(self, item, db):
@@ -1164,13 +1167,27 @@ class OrderView(CRUDView):
             raise ValidationError("Cannot delete a shipped order")
 ```
 
+### Example: Set current user on create
+
+```python
+from fasthx_admin import CRUDView, get_current_user
+
+class TicketView(CRUDView):
+    model = Ticket
+
+    def on_model_change(self, item, form_data, is_new, db, request=None):
+        if is_new:
+            user = get_current_user(request) or {}
+            item.created_by = user.get("username", "Unknown")
+```
+
 ### Example: Sync external system on change
 
 ```python
 class ServerView(CRUDView):
     model = Server
 
-    def on_model_change(self, item, form_data, is_new, db):
+    def on_model_change(self, item, form_data, is_new, db, request=None):
         if not is_new and item.ipaddress != form_data.get("ipaddress"):
             # Update DNS before commit
             update_dns_record(item.hostname, form_data.get("ipaddress"))
@@ -1993,8 +2010,8 @@ fasthx-admin is designed as a drop-in conceptual replacement for Flask-Admin. He
 | `form_args` | `form_widget_overrides` | Renamed, supports HTMX attrs |
 | `form_ajax_refs` | `form_ajax_refs` | Same concept; uses HTMX instead of Select2 |
 | `column_extra_row_actions` | `row_actions` | List of dicts with HTMX attrs |
-| `on_model_change(form, model, is_created)` | `on_model_change(item, form_data, is_new, db)` | Same concept; uses form_data dict instead of WTForms |
-| `after_model_change(form, model, is_created)` | `after_model_change(item, form_data, is_new, db)` | Same concept |
+| `on_model_change(form, model, is_created)` | `on_model_change(item, form_data, is_new, db, request)` | Same concept; uses form_data dict instead of WTForms, includes request |
+| `after_model_change(form, model, is_created)` | `after_model_change(item, form_data, is_new, db, request)` | Same concept; includes request for user context |
 | `on_model_delete(model)` | `on_model_delete(item, db)` | Same concept; db session passed explicitly |
 | `after_model_delete(model)` | `after_model_delete(item, db)` | Same concept |
 | `column_filters` | `column_filters` | List of column names for filter dropdowns |
