@@ -1155,7 +1155,7 @@ class CRUDView:
             try:
                 view._apply_form_data(item, form_data)
                 view.validate(item, form_data, is_new=True)
-                view.on_model_change(item, form_data, is_new=True, db=db)
+                view.on_model_change(item, form_data, is_new=True, db=db, request=request)
                 db.add(item)
                 db.commit()
             except ValidationError as e:
@@ -1169,7 +1169,7 @@ class CRUDView:
                 error_msg = str(e) or "An unexpected error occurred."
             else:
                 error_msg = None
-                view.after_model_change(item, form_data, is_new=True, db=db)
+                view.after_model_change(item, form_data, is_new=True, db=db, request=request)
             if error_msg:
                 form_fields = view._prepare_form_fields(db, item)
                 return templates.TemplateResponse(view.create_template, {
@@ -1259,7 +1259,7 @@ class CRUDView:
             try:
                 view._apply_form_data(item, form_data)
                 view.validate(item, form_data, is_new=False)
-                view.on_model_change(item, form_data, is_new=False, db=db)
+                view.on_model_change(item, form_data, is_new=False, db=db, request=request)
                 db.commit()
             except ValidationError as e:
                 db.rollback()
@@ -1272,7 +1272,7 @@ class CRUDView:
                 error_msg = str(e) or "An unexpected error occurred."
             else:
                 error_msg = None
-                view.after_model_change(item, form_data, is_new=False, db=db)
+                view.after_model_change(item, form_data, is_new=False, db=db, request=request)
             if error_msg:
                 form_fields = view._prepare_form_fields(db, item)
                 return templates.TemplateResponse(view.edit_template, {
@@ -1407,7 +1407,7 @@ class CRUDView:
         """
         pass
 
-    def on_model_change(self, item, form_data, is_new: bool, db: Session):
+    def on_model_change(self, item, form_data, is_new: bool, db: Session, request: Request = None):
         """Called before a model is committed on create or edit.
 
         Runs after ``validate()`` succeeds and before ``db.commit()``.
@@ -1418,10 +1418,11 @@ class CRUDView:
             form_data: The raw form data dict.
             is_new: True for create, False for edit.
             db: The SQLAlchemy session.
+            request: The current FastAPI request.
         """
         pass
 
-    def after_model_change(self, item, form_data, is_new: bool, db: Session):
+    def after_model_change(self, item, form_data, is_new: bool, db: Session, request: Request = None):
         """Called after a model is successfully committed on create or edit.
 
         Use this for side effects like audit logging, cache invalidation,
@@ -1432,6 +1433,7 @@ class CRUDView:
             form_data: The raw form data dict.
             is_new: True for create, False for edit.
             db: The SQLAlchemy session.
+            request: The current FastAPI request.
         """
         pass
 
