@@ -479,6 +479,7 @@ class CRUDView:
     can_delete = True
     htmx_columns = None
     column_filters = None
+    detail_columns = None
     export_types = None
     progress_redis_url = None
     list_template = "list.html"
@@ -589,6 +590,19 @@ class CRUDView:
                         "type": col_type,
                         "sortable": False,  # relationship traversal not sortable at DB level
                     })
+
+        # Build detail view metadata (all columns by default, or detail_columns if set)
+        detail_keys = self.detail_columns or all_columns
+        self.detail_meta = []
+        for key in detail_keys:
+            col_obj = col_map_meta.get(key)
+            if col_obj is not None:
+                col_type = type(col_obj.type).__name__
+                self.detail_meta.append({
+                    "key": col_obj.key,
+                    "label": (self.column_labels or {}).get(col_obj.key, col_obj.key.replace("_", " ").title()),
+                    "type": col_type,
+                })
 
         # Build form field metadata (ordered by form_columns)
         self.form_fields = []
@@ -1199,10 +1213,10 @@ class CRUDView:
                 return HTMLResponse("Not found", status_code=404)
 
             fields = []
-            for col_meta in view.columns_meta:
+            for col_meta in view.detail_meta:
                 key = col_meta["key"]
                 value = _resolve_dotted(item, key)
-                if key in view.column_formatters:
+                if key in (view.column_formatters or {}):
                     formatted = view.column_formatters[key](value, item)
                 else:
                     formatted = value

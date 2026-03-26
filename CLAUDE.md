@@ -217,6 +217,9 @@ column_sortable = None          # Sortable columns (default: all)
 column_filters = None           # Filterable columns
 page_size = 20                  # Rows per page
 
+# Detail view
+detail_columns = None           # Columns for detail page (default: all model columns)
+
 # Form view
 form_columns = None             # Fields to show (default: all except pk)
 form_sections = None            # Dict[section, [fields]] for accordion layout

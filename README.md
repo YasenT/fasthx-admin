@@ -50,6 +50,7 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
   - [Column Configuration](#column-configuration)
   - [Column Formatters](#column-formatters)
   - [Form Configuration](#form-configuration)
+  - [Detail View](#detail-view)
   - [Form Sections (Accordion Groups)](#form-sections-accordion-groups)
   - [Form Widget Overrides](#form-widget-overrides)
   - [AJAX Select (Searchable Foreign Keys)](#ajax-select-searchable-foreign-keys)
@@ -455,6 +456,28 @@ Field types are auto-detected from the SQLAlchemy column type:
 | `Date` | `<input type="date">` |
 | `Enum` | `<select>` with enum values |
 | Foreign Key | `<select>` auto-populated from related model |
+
+### Detail View
+
+The detail view (`GET /{name}/{id}`) shows a read-only page for a single record. By default it displays **all model columns** — not just the ones in `column_list`.
+
+```python
+class DeviceView(CRUDView):
+    model = Device
+
+    # List view shows a subset
+    column_list = ["id", "hostname", "status"]
+
+    # Detail view shows ALL columns by default — no config needed
+
+    # Or customize which columns appear in the detail view:
+    detail_columns = ["id", "hostname", "ip_address", "serial_number",
+                      "status", "site_id", "created_at", "updated_at"]
+```
+
+`column_labels` and `column_formatters` apply to detail view fields when matching keys exist.
+
+> **New in 0.5.4:** Detail view now shows all model columns by default instead of only `column_list` columns. Use `detail_columns` to customize.
 
 ### Form Sections (Accordion Groups)
 
