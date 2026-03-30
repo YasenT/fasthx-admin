@@ -671,6 +671,9 @@ class CRUDView:
                     page: int = 1,
                     db: Session = Depends(get_db),
                 ):
+                    denied = view._check_access(request)
+                    if denied:
+                        return denied
                     query = db.query(tgt_model)
                     if q and s_fields:
                         filters = [
@@ -842,6 +845,9 @@ class CRUDView:
         redis_url = self.progress_redis_url
 
         async def progress_handler(request: Request, item_id):
+            denied = view._check_access(request)
+            if denied:
+                return denied
             try:
                 r = redis_lib.Redis.from_url(redis_url, decode_responses=True)
                 raw = r.get(f"{view.name}:{item_id}:progress")
@@ -916,6 +922,9 @@ class CRUDView:
 
             def make_handler(fk, fmt, terminals):
                 async def handler(request: Request, item_id, db: Session = Depends(get_db)):
+                    denied = view._check_access(request)
+                    if denied:
+                        return denied
                     item = db.query(model).filter(getattr(model, view.pk_field) == item_id).first()
                     if not item:
                         return HTMLResponse("")
@@ -984,6 +993,19 @@ class CRUDView:
         """Override in subclasses to register custom HTMX endpoints on self.router."""
         pass
 
+    def _check_access(self, request: Request):
+        """Return a 403 response if the current user is not allowed, else None."""
+        if not self.allowed_users and not self.allowed_groups:
+            return None
+        user = get_current_user(request)
+        username = (user or {}).get("username", "")
+        user_groups = (user or {}).get("groups", [])
+        if self.allowed_users and username in self.allowed_users:
+            return None
+        if self.allowed_groups and any(g in self.allowed_groups for g in user_groups):
+            return None
+        return HTMLResponse("Access denied", status_code=403)
+
     def _setup_routes(self):
         model = self.model
         templates = self.templates
@@ -998,6 +1020,9 @@ class CRUDView:
             order: str = "asc",
             db: Session = Depends(get_db),
         ):
+            denied = view._check_access(request)
+            if denied:
+                return denied
             # Parse active filters from query params (flt{idx}_{col}_{op}=value)
             active_filters = _parse_filter_params(request, view.column_filters, view.column_labels)
 
@@ -1077,6 +1102,9 @@ class CRUDView:
                 order: str = "asc",
                 db: Session = Depends(get_db),
             ):
+                denied = view._check_access(request)
+                if denied:
+                    return denied
                 if fmt not in view.export_types:
                     return HTMLResponse("Export format not supported", status_code=400)
 
@@ -1145,6 +1173,9 @@ class CRUDView:
             request: Request,
             db: Session = Depends(get_db),
         ):
+            denied = view._check_access(request)
+            if denied:
+                return denied
             if not view.can_create:
                 return HTMLResponse("Create not allowed", status_code=403)
 
@@ -1165,6 +1196,9 @@ class CRUDView:
             request: Request,
             db: Session = Depends(get_db),
         ):
+            denied = view._check_access(request)
+            if denied:
+                return denied
             form_data = await request.form()
             item = model()
             try:
@@ -1209,6 +1243,9 @@ class CRUDView:
             item_id,
             db: Session = Depends(get_db),
         ):
+            denied = view._check_access(request)
+            if denied:
+                return denied
             item = db.query(model).filter(getattr(model, view.pk_field) == item_id).first()
             if not item:
                 return HTMLResponse("Not found", status_code=404)
@@ -1240,6 +1277,9 @@ class CRUDView:
             item_id,
             db: Session = Depends(get_db),
         ):
+            denied = view._check_access(request)
+            if denied:
+                return denied
             if not view.can_edit:
                 return HTMLResponse("Edit not allowed", status_code=403)
 
@@ -1265,6 +1305,9 @@ class CRUDView:
             item_id,
             db: Session = Depends(get_db),
         ):
+            denied = view._check_access(request)
+            if denied:
+                return denied
             item = db.query(model).filter(getattr(model, view.pk_field) == item_id).first()
             if not item:
                 return HTMLResponse("Not found", status_code=404)
@@ -1311,6 +1354,9 @@ class CRUDView:
             item_id,
             db: Session = Depends(get_db),
         ):
+            denied = view._check_access(request)
+            if denied:
+                return denied
             if not view.can_delete:
                 return HTMLResponse("Delete not allowed", status_code=403)
 
