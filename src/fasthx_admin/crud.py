@@ -783,7 +783,8 @@ class CRUDView:
 
     def get_colspan(self) -> int:
         """Calculate table colspan (columns + actions column if present)."""
-        return len(self.columns_meta) + (1 if self.row_actions else 0)
+        show_actions = self.row_actions or self.can_edit or self.can_delete
+        return len(self.columns_meta) + (1 if show_actions else 0)
 
     def progress_response(self, request: Request, item_id, item=None, progress: int = 0, status: str = "Starting..."):
         """Return an HTMLResponse rendering the progress bar row.
