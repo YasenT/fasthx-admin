@@ -480,6 +480,7 @@ class CRUDView:
     htmx_columns = None
     column_filters = None
     detail_columns = None
+    detail_columns_exclude = None
     export_types = None
     progress_redis_url = None
     list_template = "list.html"
@@ -593,6 +594,8 @@ class CRUDView:
 
         # Build detail view metadata (all columns by default, or detail_columns if set)
         detail_keys = self.detail_columns or all_columns
+        if self.detail_columns_exclude:
+            detail_keys = [k for k in detail_keys if k not in self.detail_columns_exclude]
         self.detail_meta = []
         for key in detail_keys:
             col_obj = col_map_meta.get(key)
