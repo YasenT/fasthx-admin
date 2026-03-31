@@ -12,6 +12,11 @@
 {% set flt_qs = flt_qs ~ '&flt' ~ idx ~ '_' ~ f[0] ~ '_' ~ f[1] ~ '=' ~ f[2] %}
 {% endfor %}
 {% endif %}
+{% if header_filter_values %}
+{% for col, val in header_filter_values.items() %}
+{% set flt_qs = flt_qs ~ '&cf_' ~ col ~ '=' ~ val %}
+{% endfor %}
+{% endif %}
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
@@ -120,6 +125,29 @@
                     </th>
                     {% endfor %}
                 </tr>
+                {% if view.column_header_filters %}
+                <tr class="header-filters">
+                    {% if row_actions or view.can_edit or view.can_delete %}
+                    <th></th>
+                    {% endif %}
+                    {% for col in columns %}
+                    <th style="padding: 0.25rem 0.5rem;">
+                        {% if col.key in view.column_header_filters %}
+                        <input type="text"
+                               class="form-control form-control-sm cf-input"
+                               name="cf_{{ col.key }}"
+                               placeholder="Filter..."
+                               value="{{ header_filter_values.get(col.key, '') }}"
+                               hx-get="/{{ view.name }}?partial=1"
+                               hx-trigger="keyup changed delay:300ms"
+                               hx-target="#table-body"
+                               hx-include=".cf-input, [name='q']"
+                               style="font-size: 0.8em;">
+                        {% endif %}
+                    </th>
+                    {% endfor %}
+                </tr>
+                {% endif %}
             </thead>
             <tbody id="table-body">
                 {% include "partials/table_body.html" %}

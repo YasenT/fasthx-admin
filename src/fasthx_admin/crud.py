@@ -479,6 +479,7 @@ class CRUDView:
     can_delete = True
     htmx_columns = None
     column_filters = None
+    column_header_filters = None
     detail_columns = None
     detail_columns_exclude = None
     export_types = None
@@ -1059,7 +1060,25 @@ class CRUDView:
             # Parse active filters from query params (flt{idx}_{col}_{op}=value)
             active_filters = _parse_filter_params(request, view.column_filters, view.column_labels)
 
+            # Parse inline header filters (cf_{col}=value)
+            header_filter_values = {}
+            if view.column_header_filters:
+                allowed_hf = set(view.column_header_filters)
+                for key, val in request.query_params.items():
+                    if key.startswith("cf_") and val:
+                        col_key = key[3:]
+                        if col_key in allowed_hf:
+                            header_filter_values[col_key] = val
+
             query = _safe_build_query(view, db, q, sort, order, active_filters)
+
+            # Apply header filters as "contains" on each column
+            if header_filter_values:
+                mapper = inspect(model)
+                for col_key, val in header_filter_values.items():
+                    col = getattr(model, col_key, None)
+                    if col is not None:
+                        query = query.filter(cast(col, String).ilike(f"%{val}%"))
             total = query.count()
             total_pages = max(1, math.ceil(total / view.page_size))
             page = max(1, min(page, total_pages))
@@ -1099,6 +1118,7 @@ class CRUDView:
                 "row_actions": view.row_actions,
                 "filter_defs": filter_defs,
                 "active_filters": active_filters,
+                "header_filter_values": header_filter_values,
             }
 
             if request.headers.get("HX-Request") and request.query_params.get("partial"):
@@ -1115,7 +1135,7 @@ class CRUDView:
                 if page > 1:
                     params.append(("page", str(page)))
                 for key, val in request.query_params.multi_items():
-                    if key.startswith("flt"):
+                    if key.startswith("flt") or key.startswith("cf_"):
                         params.append((key, val))
                 clean_url = f"/{view.name}"
                 if params:
