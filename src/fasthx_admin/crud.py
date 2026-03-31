@@ -768,9 +768,39 @@ class CRUDView:
         if search and self.column_searchable:
             mapper = inspect(self.model)
             search_filters = []
+            joined_tables = set()
             for col_key in self.column_searchable:
+                # Dotted notation: "serverid.hostname" targets a specific FK column
+                if "." in col_key:
+                    fk_col, target_col_name = col_key.split(".", 1)
+                    if fk_col in self.foreign_keys:
+                        fk = self.foreign_keys[fk_col]
+                        target_table = fk.column.table
+                        target_model = _model_registry.get(target_table.name)
+                        if target_model:
+                            if target_table.name not in joined_tables:
+                                local_col = mapper.columns[fk_col]
+                                query = query.outerjoin(target_model, local_col == fk.column)
+                                joined_tables.add(target_table.name)
+                            tcol = getattr(target_model, target_col_name, None)
+                            if tcol is not None:
+                                search_filters.append(cast(tcol, String).ilike(f"%{search}%"))
+                    continue
                 col = mapper.columns[col_key]
-                if isinstance(col.type, String):
+                # Bare FK column: join and search all string columns on the related table
+                if col_key in self.foreign_keys:
+                    fk = self.foreign_keys[col_key]
+                    target_table = fk.column.table
+                    target_model = _model_registry.get(target_table.name)
+                    if target_model:
+                        if target_table.name not in joined_tables:
+                            query = query.outerjoin(target_model, col == fk.column)
+                            joined_tables.add(target_table.name)
+                        target_mapper = inspect(target_model)
+                        for tcol in target_mapper.columns:
+                            if isinstance(tcol.type, String):
+                                search_filters.append(tcol.ilike(f"%{search}%"))
+                elif isinstance(col.type, String):
                     search_filters.append(col.ilike(f"%{search}%"))
                 else:
                     search_filters.append(cast(col, String).ilike(f"%{search}%"))
