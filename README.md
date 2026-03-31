@@ -58,6 +58,8 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
   - [HTMX Polling Columns](#htmx-polling-columns)
   - [Permissions](#permissions)
   - [Sidebar Visibility](#sidebar-visibility)
+- [Column Filters](#column-filters)
+  - [Inline Header Filters](#inline-header-filters)
 - [Custom Endpoints](#custom-endpoints)
   - [Endpoint Decorator (Recommended)](#endpoint-decorator-recommended)
   - [setup_endpoints Override (Legacy)](#setup_endpoints-override-legacy)
@@ -100,7 +102,9 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
 - **Custom row actions** -- per-row buttons with HTMX (deploy, build, reset, etc.)
 - **Collapsible sidebar categories** -- click category headers to collapse/expand, state persisted in localStorage, active category auto-expands
 - **Responsive sidebar** -- auto-grouped from model metadata, collapses on mobile
-- **View-level permissions** -- restrict sidebar visibility of views and links by user or group (`allowed_users`, `allowed_groups`)
+- **View-level access control** -- restrict views by user or group (`allowed_users`, `allowed_groups`) with both sidebar and route-level enforcement
+- **Inline header filters** -- per-column text filters in the table header with FK relationship support
+- **FK-aware search** -- search through foreign key relationships using dotted notation (e.g., `"serverid.hostname"`)
 - **OIDC/Keycloak auth** -- Resource Owner Password Credentials flow with group-based access
 - **Dev mode** -- set `AUTH_DISABLED=1` to bypass auth entirely
 - **Foreign key dropdowns** -- auto-populated from related models
@@ -387,6 +391,13 @@ class DeviceView(CRUDView):
     # Restrict which columns are searchable (default: all String columns)
     column_searchable = ["hostname", "ip_address"]
 
+    # Search through foreign key relationships using dotted notation
+    # This joins the related table and searches the specified column
+    column_searchable = ["hostname", "serverid.hostname"]
+
+    # Or search all string columns on the related table (no dot)
+    column_searchable = ["hostname", "serverid"]
+
     # Restrict which columns are sortable (default: all columns)
     column_sortable = ["id", "hostname", "status"]
 ```
@@ -475,8 +486,19 @@ class DeviceView(CRUDView):
                       "status", "site_id", "created_at", "updated_at"]
 ```
 
+You can also exclude specific columns instead of listing them all:
+
+```python
+class DeviceView(CRUDView):
+    model = Device
+    detail_columns_exclude = ["password", "api_key", "created_at"]
+```
+
+`detail_columns_exclude` works with both explicit `detail_columns` lists and the default (all columns). If both `detail_columns` and `detail_columns_exclude` are set, exclusions are applied after the explicit list.
+
 `column_labels` and `column_formatters` apply to detail view fields when matching keys exist.
 
+> **New in 0.5.8:** Added `detail_columns_exclude` for excluding columns without listing all others.
 > **New in 0.5.4:** Detail view now shows all model columns by default instead of only `column_list` columns. Use `detail_columns` to customize.
 
 ### Form Sections (Accordion Groups)
@@ -733,7 +755,7 @@ class NetworkView(CRUDView):
 | `allowed_users` | `list[str]` | `None` | Usernames that can see this view in the sidebar. `None` = visible to all. |
 | `allowed_groups` | `list[str]` | `None` | Group DNs that can see this view. `None` = visible to all. |
 
-If both are set, matching either list grants visibility. This only controls sidebar visibility — it does not block direct URL access to the routes.
+If both are set, matching either list grants access. This controls both sidebar visibility **and** route access — unauthorized users receive a 403 response when accessing any route on the view directly.
 
 The same `allowed_users` and `allowed_groups` parameters are available on `admin.add_link()` for custom navigation links:
 
@@ -779,6 +801,33 @@ class ServerView(CRUDView):
     }
     export_types = ["csv"]  # export respects active filters
 ```
+
+### Inline Header Filters
+
+Add per-column text filter inputs directly in the table header with `column_header_filters`. Each column gets a small text input that filters using "contains" matching with a 300ms debounce:
+
+```python
+class OfferingView(CRUDView):
+    model = Offering
+    column_list = ["id", "serverid", "ipaddress", "status"]
+    column_header_filters = ["ipaddress", "status"]
+```
+
+Header filters support foreign key relationships using dotted notation, the same as `column_searchable`:
+
+```python
+class OfferingView(CRUDView):
+    model = Offering
+    column_list = ["id", "serverid", "ipaddress", "status"]
+
+    # Filter the serverid column by searching server.hostname
+    column_header_filters = ["serverid.hostname", "ipaddress", "status"]
+```
+
+Header filters work alongside the search box and `column_filters` dropdown — all are combined (AND logic). Filter values are preserved across pagination, sorting, and URL reloads via `cf_` query parameters.
+
+> **New in 0.5.10:** Added `column_header_filters` for inline per-column filtering.
+> **New in 0.5.11:** Added dotted FK notation support for `column_header_filters`.
 
 ---
 

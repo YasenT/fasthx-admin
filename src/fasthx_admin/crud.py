@@ -1075,10 +1075,27 @@ class CRUDView:
             # Apply header filters as "contains" on each column
             if header_filter_values:
                 mapper = inspect(model)
+                hf_joined = set()
                 for col_key, val in header_filter_values.items():
-                    col = getattr(model, col_key, None)
-                    if col is not None:
-                        query = query.filter(cast(col, String).ilike(f"%{val}%"))
+                    # Dotted notation: "serverid.hostname" targets a specific FK column
+                    if "." in col_key:
+                        fk_col, target_col_name = col_key.split(".", 1)
+                        if fk_col in view.foreign_keys:
+                            fk = view.foreign_keys[fk_col]
+                            target_table = fk.column.table
+                            target_model = _model_registry.get(target_table.name)
+                            if target_model:
+                                if target_table.name not in hf_joined:
+                                    local_col = mapper.columns[fk_col]
+                                    query = query.outerjoin(target_model, local_col == fk.column)
+                                    hf_joined.add(target_table.name)
+                                tcol = getattr(target_model, target_col_name, None)
+                                if tcol is not None:
+                                    query = query.filter(cast(tcol, String).ilike(f"%{val}%"))
+                    else:
+                        col = getattr(model, col_key, None)
+                        if col is not None:
+                            query = query.filter(cast(col, String).ilike(f"%{val}%"))
             total = query.count()
             total_pages = max(1, math.ceil(total / view.page_size))
             page = max(1, min(page, total_pages))

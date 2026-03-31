@@ -132,12 +132,18 @@
                     {% endif %}
                     {% for col in columns %}
                     <th style="padding: 0.25rem 0.5rem;">
-                        {% if col.key in view.column_header_filters %}
+                        {% set hf_key = namespace(val='') %}
+                        {% for hf in view.column_header_filters %}
+                        {% if hf == col.key or hf.startswith(col.key ~ '.') %}
+                        {% set hf_key.val = hf %}
+                        {% endif %}
+                        {% endfor %}
+                        {% if hf_key.val %}
                         <input type="text"
                                class="form-control form-control-sm cf-input"
-                               name="cf_{{ col.key }}"
+                               name="cf_{{ hf_key.val }}"
                                placeholder="Filter..."
-                               value="{{ header_filter_values.get(col.key, '') }}"
+                               value="{{ header_filter_values.get(hf_key.val, '') }}"
                                hx-get="/{{ view.name }}?partial=1"
                                hx-trigger="keyup changed delay:300ms"
                                hx-target="#table-body"
