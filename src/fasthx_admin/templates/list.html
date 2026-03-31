@@ -50,6 +50,25 @@
             </ul>
         </div>
         {% endif %}
+        {% if view.multi_row_actions %}
+        <div class="btn-group" id="multi-row-actions-group" style="display:none;">
+            <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown">
+                <i class="bi bi-check2-square"></i> With Selected (<span id="multi-row-count">0</span>)
+            </button>
+            <ul class="dropdown-menu">
+                {% for action in view.multi_row_actions %}
+                <li>
+                    <button class="dropdown-item multi-row-action {{ action.get('class', '') }}"
+                            data-url="{{ action.hx_post }}"
+                            {% if action.get('confirm') %}data-confirm="{{ action.confirm }}"{% endif %}>
+                        {% if action.get('icon') %}<i class="bi bi-{{ action.icon }}"></i>{% endif %}
+                        {{ action.label }}
+                    </button>
+                </li>
+                {% endfor %}
+            </ul>
+        </div>
+        {% endif %}
         {% if filter_defs %}
         <select id="add-filter-select" class="form-select form-select-sm no-tomselect" style="width:auto; min-width:140px;">
             <option value="">Add Filter...</option>
@@ -106,6 +125,11 @@
         <table class="table table-hover mb-0">
             <thead>
                 <tr>
+                    {% if view.multi_row_actions %}
+                    <th style="width: 1px; white-space: nowrap;">
+                        <input type="checkbox" class="form-check-input" id="multi-row-select-all" title="Select all">
+                    </th>
+                    {% endif %}
                     {% if row_actions or view.can_edit or view.can_delete %}
                     <th class="text-start" style="width: 1px; white-space: nowrap;">Actions</th>
                     {% endif %}
@@ -127,6 +151,9 @@
                 </tr>
                 {% if view.column_header_filters %}
                 <tr class="header-filters">
+                    {% if view.multi_row_actions %}
+                    <th></th>
+                    {% endif %}
                     {% if row_actions or view.can_edit or view.can_delete %}
                     <th></th>
                     {% endif %}
@@ -343,6 +370,79 @@
             window.location.href = url.toString();
         });
     }
+})();
+</script>
+{% endif %}
+{% if view.multi_row_actions %}
+<script>
+(function() {
+    var selectAll = document.getElementById('multi-row-select-all');
+    var actionsGroup = document.getElementById('multi-row-actions-group');
+    var countSpan = document.getElementById('multi-row-count');
+
+    function getChecked() {
+        return document.querySelectorAll('.multi-row-check:checked');
+    }
+
+    function updateUI() {
+        var checked = getChecked();
+        countSpan.textContent = checked.length;
+        actionsGroup.style.display = checked.length > 0 ? '' : 'none';
+    }
+
+    /* Select all / deselect all */
+    selectAll.addEventListener('change', function() {
+        var boxes = document.querySelectorAll('.multi-row-check');
+        for (var i = 0; i < boxes.length; i++) boxes[i].checked = selectAll.checked;
+        updateUI();
+    });
+
+    /* Individual checkbox changes — use event delegation for HTMX-swapped content */
+    document.getElementById('table-body').addEventListener('change', function(e) {
+        if (e.target.classList.contains('multi-row-check')) {
+            updateUI();
+            /* Uncheck select-all if any box is unchecked */
+            if (!e.target.checked) selectAll.checked = false;
+            /* Check select-all if all are checked */
+            var boxes = document.querySelectorAll('.multi-row-check');
+            var allChecked = true;
+            for (var i = 0; i < boxes.length; i++) { if (!boxes[i].checked) { allChecked = false; break; } }
+            if (allChecked && boxes.length > 0) selectAll.checked = true;
+        }
+    });
+
+    /* Action button clicks */
+    var actionBtns = document.querySelectorAll('.multi-row-action');
+    for (var i = 0; i < actionBtns.length; i++) {
+        actionBtns[i].addEventListener('click', function(e) {
+            e.preventDefault();
+            var url = this.getAttribute('data-url');
+            var confirm_msg = this.getAttribute('data-confirm');
+            var checked = getChecked();
+            if (checked.length === 0) return;
+            if (confirm_msg && !confirm(confirm_msg)) return;
+
+            /* Build form data with selected IDs and POST */
+            var formData = new FormData();
+            for (var j = 0; j < checked.length; j++) {
+                formData.append('ids', checked[j].value);
+            }
+            fetch(url, {
+                method: 'POST',
+                body: formData,
+            }).then(function(resp) {
+                window.location.reload();
+            });
+        });
+    }
+
+    /* Re-check select-all state after HTMX swaps new table content */
+    document.body.addEventListener('htmx:afterSwap', function(e) {
+        if (e.detail.target && e.detail.target.id === 'table-body') {
+            selectAll.checked = false;
+            updateUI();
+        }
+    });
 })();
 </script>
 {% endif %}

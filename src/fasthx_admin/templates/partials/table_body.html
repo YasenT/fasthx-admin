@@ -1,5 +1,10 @@
 {% for row in rows %}
 <tr>
+    {% if view.multi_row_actions %}
+    <td style="width: 1px; white-space: nowrap;">
+        <input type="checkbox" class="form-check-input multi-row-check" value="{{ row._id }}">
+    </td>
+    {% endif %}
     {% if row_actions or view.can_edit or view.can_delete %}
     <td class="text-start" style="white-space: nowrap;">
     {% include "partials/row_actions.html" %}
@@ -26,7 +31,7 @@
 </tr>
 {% else %}
 <tr>
-    <td colspan="{{ columns|length + (1 if row_actions or view.can_edit or view.can_delete else 0) }}" class="text-center text-muted py-4">
+    <td colspan="{{ columns|length + (1 if row_actions or view.can_edit or view.can_delete else 0) + (1 if view.multi_row_actions else 0) }}" class="text-center text-muted py-4">
         No records found.
     </td>
 </tr>

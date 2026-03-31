@@ -55,6 +55,7 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
   - [Form Widget Overrides](#form-widget-overrides)
   - [AJAX Select (Searchable Foreign Keys)](#ajax-select-searchable-foreign-keys)
   - [Row Actions](#row-actions)
+  - [Multi Row Actions](#multi-row-actions)
   - [HTMX Polling Columns](#htmx-polling-columns)
   - [Permissions](#permissions)
   - [Sidebar Visibility](#sidebar-visibility)
@@ -100,6 +101,7 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
 - **Accordion form sections** -- group form fields into collapsible sections
 - **Custom column formatters** -- render badges, links, icons, code blocks in table cells
 - **Custom row actions** -- per-row buttons with HTMX (deploy, build, reset, etc.)
+- **Multi row actions** -- bulk operations on selected rows with checkboxes and "With Selected" dropdown
 - **Collapsible sidebar categories** -- click category headers to collapse/expand, state persisted in localStorage, active category auto-expands
 - **Responsive sidebar** -- auto-grouped from model metadata, collapses on mobile
 - **View-level access control** -- restrict views by user or group (`allowed_users`, `allowed_groups`) with both sidebar and route-level enforcement
@@ -702,6 +704,53 @@ This renders a standard `<a>` link instead of an HTMX button, so the browser han
 | `target` | Link target (e.g., `"_blank"`) for opening in a new tab (optional, use with `href`) |
 | `class` | CSS class for the button (default: `"btn-outline-primary"`) |
 | `confirm` | If set, shows a confirmation dialog before executing |
+
+### Multi Row Actions
+
+Add bulk actions that operate on multiple selected rows. When `multi_row_actions` is set, a checkbox column appears on the left of the table with a "Select all" checkbox in the header. A "With Selected" dropdown appears in the toolbar when items are checked:
+
+```python
+class OfferingView(CRUDView):
+    model = Offering
+    multi_row_actions = [
+        {
+            "label": "Delete Selected",
+            "icon": "trash",
+            "hx_post": "/offerings/bulk-delete",
+            "confirm": "Delete all selected items?",
+            "class": "text-danger",
+        },
+        {
+            "label": "Activate Selected",
+            "icon": "check-circle",
+            "hx_post": "/offerings/bulk-activate",
+        },
+    ]
+```
+
+Define the bulk action endpoint on your view. Selected IDs are sent as `ids` form data:
+
+```python
+@CRUDView.endpoint("/{name}/bulk-delete", methods=["POST"], response_class=HTMLResponse)
+async def bulk_delete(self, request: Request, db: Session = Depends(get_db)):
+    form = await request.form()
+    ids = form.getlist("ids")
+    db.query(self.model).filter(self.model.id.in_(ids)).delete(synchronize_session=False)
+    db.commit()
+    return toast_response(f"Deleted {len(ids)} items", type="success")
+```
+
+#### Multi row action fields
+
+| Field | Description |
+|---|---|
+| `label` | Button text in the dropdown |
+| `icon` | Bootstrap Icons name (optional) |
+| `hx_post` | POST URL for the bulk action |
+| `confirm` | If set, shows a confirmation dialog before executing |
+| `class` | CSS class for the dropdown item (e.g., `"text-danger"`) |
+
+> **New in 0.5.13:** Added `multi_row_actions` for bulk operations on selected rows.
 
 ### HTMX Polling Columns
 

@@ -472,6 +472,7 @@ class CRUDView:
     form_widget_overrides = None
     form_ajax_refs = None
     row_actions = None
+    multi_row_actions = None
     page_size = 20
     pk_field = "id"
     can_create = True
@@ -513,6 +514,7 @@ class CRUDView:
         self.form_widget_overrides = self.form_widget_overrides or {}
         self.form_ajax_refs = self.form_ajax_refs or {}
         self.row_actions = self.row_actions or []
+        self.multi_row_actions = self.multi_row_actions or []
         self.htmx_columns = self.htmx_columns or {}
 
         # Register model in our registry
