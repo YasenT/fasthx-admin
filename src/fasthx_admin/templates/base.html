@@ -36,7 +36,19 @@
                     </a>
                 </li>
 
+                {% if nav_categories.get(None) %}
+                {% for view_info in nav_categories[None] %}
+                <li class="sidebar-item">
+                    <a href="{{ view_info.url }}" class="sidebar-link {% if active_page == view_info.name %}active{% endif %}">
+                        <i class="bi bi-{{ view_info.icon }}"></i>
+                        <span>{{ view_info.display_name }}</span>
+                    </a>
+                </li>
+                {% endfor %}
+                {% endif %}
+
                 {% for category, views in nav_categories.items() %}
+                {% if category is not none %}
                 {% set has_active = namespace(val=false) %}
                 {% for view_info in views %}
                     {% if active_page == view_info.name %}{% set has_active.val = true %}{% endif %}
@@ -55,6 +67,7 @@
                 </li>
                 {% endfor %}
                 </div>
+                {% endif %}
                 {% endfor %}
 
                 <li class="sidebar-category" data-category="Wizards" onclick="toggleCategory(this)" role="button">

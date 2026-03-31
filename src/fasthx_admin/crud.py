@@ -1793,12 +1793,12 @@ class Admin:
         for view in self.views:
             if not self._user_allowed(user, view.allowed_users, view.allowed_groups):
                 continue
-            cat = view.category or "Other"
+            cat = view.category or None
             categories[cat].append(view.get_nav_info())
         for link in self._custom_links:
             if not self._user_allowed(user, link.get("allowed_users"), link.get("allowed_groups")):
                 continue
-            cat = link.get("category", "Other")
+            cat = link.get("category") or None
             categories[cat].append({
                 "name": link["name"],
                 "url": link["url"],
