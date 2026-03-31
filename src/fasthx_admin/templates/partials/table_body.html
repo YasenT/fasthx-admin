@@ -18,9 +18,10 @@
         {% set terminal_lower = cell.htmx.terminal_states | default([]) | map('lower') | list %}
         {% set is_terminal = terminal_lower and raw_str | lower in terminal_lower %}
         <span id="htmx-{{ col.key }}-{{ row._id }}"
-              {% if not is_terminal %}hx-get="{{ cell.htmx.url | replace('{id}', row._id|string) }}"
-              hx-trigger="{{ cell.htmx.trigger | default('every 3s') }}"
-              hx-swap="innerHTML"{% endif %}>
+              class="poll-cell"
+              data-row-id="{{ row._id }}"
+              data-col-key="{{ col.key }}"
+              {% if is_terminal %}data-terminal="1"{% endif %}>
             {{ (cell.formatted if cell.formatted is not none else '') | safe }}
         </span>
         {% else %}

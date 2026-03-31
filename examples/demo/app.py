@@ -332,6 +332,21 @@ class EdgeView(CRUDView):
             "confirm": "Reset this edge device?",
         },
     ]
+    multi_row_actions = [
+        {
+            "label": "Reset Selected",
+            "icon": "arrow-counterclockwise",
+            "hx_post": "/edges/bulk-reset",
+            "confirm": "Reset all selected edges?",
+        },
+        {
+            "label": "Delete Selected",
+            "icon": "trash",
+            "hx_post": "/edges/bulk-delete",
+            "confirm": "Delete all selected edges?",
+            "class": "text-danger",
+        },
+    ]
     form_sections = {
         "Device Info": ["hostname", "serial_number"],
         "Status": ["status"],
@@ -395,6 +410,29 @@ class EdgeView(CRUDView):
             "status": state.get("status", "deploying"),
             "colspan": colspan,
         })
+
+    @CRUDView.endpoint("/{name}/bulk-reset", methods=["POST"], response_class=HTMLResponse)
+    async def bulk_reset(self, request: Request, db: Session = Depends(get_db)):
+        form = await request.form()
+        ids = form.getlist("ids")
+        count = 0
+        for eid in ids:
+            edge = db.query(self.model).filter(self.model.id == int(eid)).first()
+            if edge:
+                edge.status = EdgeStatus.PENDING
+                edge.deploy_progress = 0
+                self.deploy_progress.pop(int(eid), None)
+                count += 1
+        db.commit()
+        return toast_response(f"Reset {count} edges", type="success", redirect=f"/{self.name}")
+
+    @CRUDView.endpoint("/{name}/bulk-delete", methods=["POST"], response_class=HTMLResponse)
+    async def bulk_delete(self, request: Request, db: Session = Depends(get_db)):
+        form = await request.form()
+        ids = form.getlist("ids")
+        count = db.query(self.model).filter(self.model.id.in_([int(i) for i in ids])).delete(synchronize_session=False)
+        db.commit()
+        return toast_response(f"Deleted {count} edges", type="success", redirect=f"/{self.name}")
 
     @CRUDView.endpoint("/{name}/{item_id}/reset", methods=["POST"], response_class=HTMLResponse)
     async def reset_edge(self, request: Request, item_id: int, db: Session = Depends(get_db)):

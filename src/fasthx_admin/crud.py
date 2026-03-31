@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, FastAPI, Request, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import inspect, or_, String, cast
@@ -479,6 +479,7 @@ class CRUDView:
     can_edit = True
     can_delete = True
     htmx_columns = None
+    batch_poll_interval = 5
     column_filters = None
     column_header_filters = None
     detail_columns = None
@@ -652,6 +653,7 @@ class CRUDView:
 
         self.router = APIRouter()
         self._setup_htmx_polling_routes()
+        self._setup_batch_poll_route()
         self._setup_progress_route()
         self._setup_ajax_select_routes()
         self._setup_decorated_endpoints()
@@ -981,6 +983,46 @@ class CRUDView:
                 methods=["GET"],
                 response_class=HTMLResponse,
             )
+
+    def _setup_batch_poll_route(self):
+        """Auto-register GET /{name}/poll-status for batch htmx column polling."""
+        if not self.htmx_columns:
+            return
+
+        model = self.model
+        view = self
+        formatters = self.column_formatters or {}
+
+        async def batch_poll(request: Request, ids: str = "", db: Session = Depends(get_db)):
+            denied = view._check_access(request)
+            if denied:
+                return denied
+            if not ids:
+                return JSONResponse({})
+            id_list = [i.strip() for i in ids.split(",") if i.strip()]
+            if not id_list:
+                return JSONResponse({})
+            items = db.query(model).filter(getattr(model, view.pk_field).in_(id_list)).all()
+            result = {}
+            for item in items:
+                item_id = str(getattr(item, view.pk_field))
+                result[item_id] = {}
+                for field_key, config in view.htmx_columns.items():
+                    value = getattr(item, field_key)
+                    status_str = value.value if hasattr(value, "value") else str(value)
+                    terminals = config.get("terminal_states", [])
+                    terminal = bool(terminals and status_str.lower() in [t.lower() for t in terminals])
+                    fmt = formatters.get(field_key)
+                    html = fmt(value, item) if fmt else status_str
+                    result[item_id][field_key] = {"html": html, "terminal": terminal}
+            return JSONResponse(result)
+
+        batch_poll.__name__ = f"{self.name}_batch_poll"
+        self.router.add_api_route(
+            f"/{self.name}/poll-status",
+            batch_poll,
+            methods=["GET"],
+        )
 
     def _setup_decorated_endpoints(self):
         """Collect methods decorated with @CRUDView.endpoint and register them."""

@@ -446,4 +446,50 @@
 })();
 </script>
 {% endif %}
+{% if view.htmx_columns %}
+<script>
+(function() {
+    var pollInterval = {{ view.batch_poll_interval }} * 1000;
+    var viewName = '{{ view.name }}';
+
+    function doPoll() {
+        /* Collect IDs of non-terminal poll cells, skipping rows with progress bars */
+        var cells = document.querySelectorAll('.poll-cell:not([data-terminal])');
+        var idSet = {};
+        for (var i = 0; i < cells.length; i++) {
+            var row = cells[i].closest('tr');
+            if (row && !row.classList.contains('progress-row')) {
+                idSet[cells[i].getAttribute('data-row-id')] = true;
+            }
+        }
+        var ids = Object.keys(idSet);
+        if (ids.length === 0) return;
+
+        fetch('/' + viewName + '/poll-status?ids=' + ids.join(','))
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                for (var itemId in data) {
+                    for (var colKey in data[itemId]) {
+                        var info = data[itemId][colKey];
+                        var span = document.getElementById('htmx-' + colKey + '-' + itemId);
+                        if (span) {
+                            span.innerHTML = info.html;
+                            if (info.terminal) {
+                                span.setAttribute('data-terminal', '1');
+                            }
+                        }
+                    }
+                }
+            })
+            .catch(function() {});
+    }
+
+    /* Initial poll after a short delay, then repeat */
+    setTimeout(function() {
+        doPoll();
+        setInterval(doPoll, pollInterval);
+    }, 1000);
+})();
+</script>
+{% endif %}
 {% endblock %}
