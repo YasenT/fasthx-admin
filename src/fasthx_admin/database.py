@@ -10,13 +10,12 @@ from __future__ import annotations
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import sessionmaker, scoped_session, declarative_base, Session
-from starlette.middleware.base import BaseHTTPMiddleware
+from sqlalchemy.orm import sessionmaker, declarative_base, Session
 
 Base = declarative_base()
 
 _engine: Engine | None = None
-_SessionLocal: scoped_session | None = None
+_SessionLocal: sessionmaker | None = None
 
 
 def init_db(database_url: str, **engine_kwargs) -> Engine:
@@ -37,8 +36,7 @@ def init_db(database_url: str, **engine_kwargs) -> Engine:
     """
     global _engine, _SessionLocal
     _engine = create_engine(database_url, **engine_kwargs)
-    session_factory = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
-    _SessionLocal = scoped_session(session_factory)
+    _SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=_engine)
     return _engine
 
 
@@ -58,20 +56,3 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-class DBSessionCleanupMiddleware(BaseHTTPMiddleware):
-    """Middleware that removes scoped sessions after each request.
-
-    This replicates Flask-SQLAlchemy's ``teardown_appcontext`` behavior,
-    ensuring sessions are fully cleaned up and connections returned to the
-    pool at the end of every request.
-    """
-
-    async def dispatch(self, request, call_next):
-        try:
-            response = await call_next(request)
-            return response
-        finally:
-            if _SessionLocal is not None:
-                _SessionLocal.remove()
