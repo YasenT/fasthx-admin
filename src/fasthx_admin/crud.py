@@ -436,7 +436,7 @@ class CRUDView:
                 model = MyModel
 
                 @CRUDView.endpoint("/{name}/{item_id}/reset", methods=["POST"])
-                async def reset(self, request: Request, item_id: int, db: Session = Depends(get_db)):
+                def reset(self, request: Request, item_id: int, db: Session = Depends(get_db)):
                     ...
 
         ``{name}`` in the path is replaced with ``self.name`` at init time.
@@ -673,7 +673,7 @@ class CRUDView:
             page_size = config.get("page_size", 10)
 
             def make_handler(fk, tgt_model, s_fields, p_size):
-                async def search_handler(
+                def search_handler(
                     request: Request,
                     q: str = "",
                     page: int = 1,
@@ -882,7 +882,7 @@ class CRUDView:
         view = self
         redis_url = self.progress_redis_url
 
-        async def progress_handler(request: Request, item_id):
+        def progress_handler(request: Request, item_id):
             denied = view._check_access(request)
             if denied:
                 return denied
@@ -959,7 +959,7 @@ class CRUDView:
             terminal_states = config.get("terminal_states", [])
 
             def make_handler(fk, fmt, terminals):
-                async def handler(request: Request, item_id, db: Session = Depends(get_db)):
+                def handler(request: Request, item_id, db: Session = Depends(get_db)):
                     denied = view._check_access(request)
                     if denied:
                         return denied
@@ -993,7 +993,7 @@ class CRUDView:
         view = self
         formatters = self.column_formatters or {}
 
-        async def batch_poll(request: Request, ids: str = "", db: Session = Depends(get_db)):
+        def batch_poll(request: Request, ids: str = "", db: Session = Depends(get_db)):
             denied = view._check_access(request)
             if denied:
                 return denied
@@ -1090,7 +1090,7 @@ class CRUDView:
         view = self
 
         @self.router.get(f"/{self.name}", response_class=HTMLResponse)
-        async def list_view(
+        def list_view(
             request: Request,
             page: int = 1,
             q: str = "",
@@ -1208,7 +1208,7 @@ class CRUDView:
 
         if view.export_types:
             @self.router.get(f"/{self.name}/export/{{fmt}}")
-            async def export_view(
+            def export_view(
                 request: Request,
                 fmt: str,
                 q: str = "",
@@ -1283,7 +1283,7 @@ class CRUDView:
                 return HTMLResponse("Unsupported format", status_code=400)
 
         @self.router.get(f"/{self.name}/create", response_class=HTMLResponse)
-        async def create_form(
+        def create_form(
             request: Request,
             db: Session = Depends(get_db),
         ):
@@ -1352,7 +1352,7 @@ class CRUDView:
             return RedirectResponse(f"/{view.name}", status_code=303)
 
         @self.router.get(f"/{self.name}/{{item_id}}", response_class=HTMLResponse)
-        async def detail_view(
+        def detail_view(
             request: Request,
             item_id,
             db: Session = Depends(get_db),
@@ -1386,7 +1386,7 @@ class CRUDView:
             })
 
         @self.router.get(f"/{self.name}/{{item_id}}/edit", response_class=HTMLResponse)
-        async def edit_form(
+        def edit_form(
             request: Request,
             item_id,
             db: Session = Depends(get_db),
@@ -1463,7 +1463,7 @@ class CRUDView:
             return RedirectResponse(f"/{view.name}", status_code=303)
 
         @self.router.post(f"/{self.name}/{{item_id}}/delete", response_class=HTMLResponse)
-        async def delete_item(
+        def delete_item(
             request: Request,
             item_id,
             db: Session = Depends(get_db),
