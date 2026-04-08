@@ -291,10 +291,21 @@ function initDependsOn(root) {
     });
 }
 
+// Bootstrap tooltips
+function initTooltips(root) {
+    var container = root || document;
+    container.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
+        if (!bootstrap.Tooltip.getInstance(el)) {
+            new bootstrap.Tooltip(el);
+        }
+    });
+}
+
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function () {
     initTomSelect();
     initDependsOn();
+    initTooltips();
 });
 
 // Destroy Tom Select instances before HTMX replaces the DOM (prevents orphaned wrappers)
@@ -314,6 +325,7 @@ document.addEventListener('htmx:afterSwap', function (event) {
     syncTomSelect(event.detail.target);
     initTomSelect(event.detail.target);
     initDependsOn(event.detail.target);
+    initTooltips(event.detail.target);
     // Auto-open modal when content is swapped into it
     var target = event.detail.target;
     if (target && target.closest && target.closest('#admin-modal')) {
@@ -329,6 +341,7 @@ document.addEventListener('htmx:afterSettle', function (event) {
         cleanupTomSelects();
         initTomSelect();
         initDependsOn();
+        initTooltips();
     }
 });
 
@@ -337,5 +350,6 @@ document.addEventListener('htmx:oobAfterSwap', function (event) {
     syncTomSelect(event.detail.target);
     initTomSelect(event.detail.target);
     initDependsOn(event.detail.target);
+    initTooltips(event.detail.target);
 });
 
