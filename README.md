@@ -537,6 +537,7 @@ Customize individual form fields with extra attributes or replace their type ent
 | `hx_trigger` | HTMX `hx-trigger` event (defaults to `"change"`) | `"hx_trigger": "change"` |
 | `hx_swap` | HTMX `hx-swap` strategy (defaults to `"innerHTML"`) | `"hx_swap": "outerHTML"` |
 | `depends_on` | Field key of a checkbox — this field is only visible when that checkbox is checked | `"depends_on": "is_ha"` |
+| `description` | Tooltip text shown as an info icon next to the field label (Bootstrap tooltip) | `"description": "Must be a public IP"` |
 
 **Examples:**
 
@@ -571,6 +572,10 @@ class EdgeView(CRUDView):
             "hx_get": "/api/orchestrators-for-customer",
             "hx_target": "#orchestrator_id",
         },
+        # Add a tooltip to explain a field
+        "wan_ip": {
+            "description": "Must be a public routable IP address",
+        },
     }
 ```
 
@@ -597,6 +602,26 @@ class LaunchPadView(CRUDView):
 ```
 
 When `is_ha` is unchecked, the `ha_mode` and `ha_switch_mode` fields are hidden. When the user toggles it on, the fields appear instantly (no server round-trip).
+
+**Field tooltips:**
+
+Use `description` to add a Bootstrap tooltip info icon next to any field label. Useful for providing context or instructions without cluttering the form:
+
+```python
+class CustomerView(CRUDView):
+    model = Customer
+    form_widget_overrides = {
+        "prisma_tsg_id": {
+            "type": "select",
+            "description": "The Prisma tenant service group to associate with this customer",
+        },
+        "contract_end": {
+            "description": "Leave blank for month-to-month agreements",
+        },
+    }
+```
+
+Hovering over the info icon displays the tooltip. Works on all field types including checkboxes, selects, and AJAX selects.
 
 ### AJAX Select (Searchable Foreign Keys)
 
