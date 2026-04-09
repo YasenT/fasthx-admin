@@ -643,6 +643,20 @@ class CRUDView:
                 }
                 field.update(self.form_widget_overrides.get(col_obj.key, {}))
                 self.form_fields.append(field)
+            elif col_key in self.form_widget_overrides:
+                # Virtual field: not a model column, defined entirely via form_widget_overrides
+                override = self.form_widget_overrides[col_key]
+                field = {
+                    "key": col_key,
+                    "label": override.get("label", col_key.replace("_", " ").title()),
+                    "type": override.get("type", "text"),
+                    "required": override.get("required", False),
+                    "choices": override.get("choices"),
+                    "is_fk": False,
+                    "virtual": True,
+                }
+                field.update(override)
+                self.form_fields.append(field)
 
         # Build searchable columns
         if self.column_searchable is None:
@@ -1501,7 +1515,9 @@ class CRUDView:
         fields = []
         for field in self.form_fields:
             f = dict(field)
-            if item:
+            if field.get("virtual"):
+                f["value"] = None
+            elif item:
                 f["value"] = getattr(item, field["key"])
             else:
                 f["value"] = None
@@ -1530,6 +1546,8 @@ class CRUDView:
         mapper = inspect(self.model)
         for field in self.form_fields:
             key = field["key"]
+            if field.get("virtual"):
+                continue
             if key in form_data:
                 value = form_data[key]
                 col = mapper.columns[key]
