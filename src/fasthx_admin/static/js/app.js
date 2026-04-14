@@ -283,7 +283,36 @@ function initDependsOn(root) {
         var toggle = function () {
             var checked = ctrl.checked;
             controllers[key].forEach(function (el) {
-                el.style.display = checked ? '' : 'none';
+                if (checked) {
+                    el.style.overflow = 'hidden';
+                    el.style.maxHeight = '0';
+                    el.style.opacity = '0';
+                    el.style.removeProperty('margin');
+                    el.style.removeProperty('padding');
+                    // Force reflow so the transition triggers from 0
+                    el.offsetHeight;
+                    el.style.transition = 'max-height .3s ease, opacity .3s ease, margin .3s ease';
+                    el.style.maxHeight = el.scrollHeight + 'px';
+                    el.style.opacity = '1';
+                    // Clean up after transition so content isn't clipped
+                    var onEnd = function () {
+                        el.style.maxHeight = '';
+                        el.style.overflow = '';
+                        el.style.transition = '';
+                        el.removeEventListener('transitionend', onEnd);
+                    };
+                    el.addEventListener('transitionend', onEnd);
+                } else {
+                    // Snap max-height to current size, then transition to 0
+                    el.style.maxHeight = el.scrollHeight + 'px';
+                    el.style.overflow = 'hidden';
+                    el.offsetHeight;
+                    el.style.transition = 'max-height .3s ease, opacity .3s ease, margin .3s ease';
+                    el.style.maxHeight = '0';
+                    el.style.opacity = '0';
+                    el.style.margin = '0';
+                    el.style.padding = '0';
+                }
             });
         };
         toggle(); // set initial state
