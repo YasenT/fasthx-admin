@@ -91,6 +91,10 @@ document.body.addEventListener('showModal', function (event) {
     var d = (event.detail && event.detail.value) ? event.detail.value : event.detail;
     showModal(d);
 });
+document.body.addEventListener('showConsole', function (event) {
+    var d = (event.detail && event.detail.value) ? event.detail.value : event.detail;
+    showConsole(d);
+});
 
 // Fallback: manually parse HX-Trigger header after swap settles.
 // Catches edge cases where the native event might not fire as expected.
@@ -110,6 +114,9 @@ document.addEventListener('htmx:afterSettle', function (event) {
         }
         if (data.showModal) {
             showModal(data.showModal);
+        }
+        if (data.showConsole) {
+            showConsole(data.showConsole);
         }
     } catch (e) {}
 });
@@ -381,4 +388,57 @@ document.addEventListener('htmx:oobAfterSwap', function (event) {
     initDependsOn(event.detail.target);
     initTooltips(event.detail.target);
 });
+
+// ---------------------------------------------------------------------------
+// Terminal Console
+// ---------------------------------------------------------------------------
+
+var _consoleObserver = null;
+var _consoleMaxLines = 5000;
+
+function showConsole(detail) {
+    showModal(detail);
+    // Set up auto-scroll after the modal content is swapped in
+    setTimeout(function () {
+        var outputEl = document.querySelector('#console-output');
+        if (!outputEl) return;
+        // Scroll to bottom initially
+        outputEl.scrollTop = outputEl.scrollHeight;
+        // Watch for new content and auto-scroll
+        if (_consoleObserver) _consoleObserver.disconnect();
+        _consoleObserver = new MutationObserver(function () {
+            // Trim old lines if over max
+            while (outputEl.children.length > _consoleMaxLines) {
+                outputEl.removeChild(outputEl.firstChild);
+            }
+            // Auto-scroll only if user is near the bottom
+            var atBottom = outputEl.scrollHeight - outputEl.scrollTop - outputEl.clientHeight < 50;
+            if (atBottom) {
+                outputEl.scrollTop = outputEl.scrollHeight;
+            }
+        });
+        _consoleObserver.observe(outputEl, { childList: true });
+        // Focus input if present
+        var input = document.querySelector('.console-input-form input');
+        if (input) input.focus();
+    }, 100);
+}
+
+// Clean up SSE connections and observer when modal closes
+(function () {
+    var modalEl = document.getElementById('admin-modal');
+    if (modalEl) {
+        modalEl.addEventListener('hidden.bs.modal', function () {
+            if (_consoleObserver) {
+                _consoleObserver.disconnect();
+                _consoleObserver = null;
+            }
+            // Disconnect any SSE connections inside the modal
+            var sseEl = modalEl.querySelector('[sse-connect]');
+            if (sseEl && typeof htmx !== 'undefined') {
+                htmx.remove(sseEl);
+            }
+        });
+    }
+})();
 

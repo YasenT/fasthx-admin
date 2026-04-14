@@ -7,6 +7,8 @@ Run with:
 
 from __future__ import annotations
 
+import asyncio
+import html as html_mod
 import logging
 import os
 import random
@@ -17,11 +19,11 @@ from contextlib import asynccontextmanager
 from typing import Dict
 
 from fastapi import FastAPI, Request, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from fasthx_admin import Admin, CRUDView, Base, init_db, get_db, get_current_user, oidc_login, AuthError, tool_registry, toast_response, ValidationError
+from fasthx_admin import Admin, CRUDView, Base, init_db, get_db, get_current_user, oidc_login, AuthError, tool_registry, toast_response, console_response, console_sse_message, ValidationError
 
 from models import Customer, Orchestrator, FortiEdge, BuildStatus, EdgeStatus
 
@@ -323,6 +325,18 @@ class EdgeView(CRUDView):
             "class": "btn-outline-success",
         },
         {
+            "label": "Logs",
+            "icon": "terminal",
+            "hx_get": "/edges/{id}/logs",
+            "class": "btn-outline-info",
+        },
+        {
+            "label": "Diagnostics",
+            "icon": "activity",
+            "hx_post": "/edges/{id}/diagnostics",
+            "class": "btn-outline-secondary",
+        },
+        {
             "label": "Reset",
             "icon": "arrow-counterclockwise",
             "hx_post": "/edges/{id}/reset",
@@ -410,6 +424,78 @@ class EdgeView(CRUDView):
             "status": state.get("status", "deploying"),
             "colspan": colspan,
         })
+
+    # --- Terminal console demos ---
+
+    @CRUDView.endpoint("/{name}/{item_id}/logs", methods=["GET"])
+    async def view_logs(self, request: Request, item_id: int, db: Session = Depends(get_db)):
+        """Static log output in a terminal console."""
+        edge = db.query(self.model).filter(self.model.id == item_id).first()
+        if not edge:
+            return HTMLResponse("Not found", status_code=404)
+        log_lines = [
+            f"\033[90m[2026-04-14 08:00:01]\033[0m \033[32m[INFO]\033[0m  Device \033[1m{edge.hostname}\033[0m booted successfully",
+            f"\033[90m[2026-04-14 08:00:02]\033[0m \033[32m[INFO]\033[0m  Firmware version: 7.4.1 build1234",
+            f"\033[90m[2026-04-14 08:00:03]\033[0m \033[32m[INFO]\033[0m  Serial: {edge.serial_number}",
+            f"\033[90m[2026-04-14 08:00:04]\033[0m \033[32m[INFO]\033[0m  Connecting to orchestrator...",
+            f"\033[90m[2026-04-14 08:00:05]\033[0m \033[32m[OK]\033[0m   Tunnel established",
+            f"\033[90m[2026-04-14 08:00:06]\033[0m \033[32m[INFO]\033[0m  Applying security policies...",
+            f"\033[90m[2026-04-14 08:00:07]\033[0m \033[33m[WARN]\033[0m  Certificate expires in 30 days",
+            f"\033[90m[2026-04-14 08:00:08]\033[0m \033[32m[OK]\033[0m   All services running",
+            f"\033[90m[2026-04-14 08:00:09]\033[0m \033[32m[INFO]\033[0m  Status: \033[1;32m{edge.status.value}\033[0m",
+        ]
+        return console_response(
+            title=f"Logs — {edge.hostname}",
+            output="\n".join(log_lines) + "\n",
+        )
+
+    @CRUDView.endpoint("/{name}/{item_id}/diagnostics", methods=["POST"])
+    async def run_diagnostics(self, request: Request, item_id: int, db: Session = Depends(get_db)):
+        """Start a diagnostics check with streaming SSE output."""
+        edge = db.query(self.model).filter(self.model.id == item_id).first()
+        if not edge:
+            return HTMLResponse("Not found", status_code=404)
+        return console_response(
+            title=f"Diagnostics — {edge.hostname}",
+            output="",
+            stream_url=f"/{self.name}/{item_id}/diagnostics-stream",
+        )
+
+    @CRUDView.endpoint("/{name}/{item_id}/diagnostics-stream", methods=["GET"])
+    async def diagnostics_stream(self, request: Request, item_id: int, db: Session = Depends(get_db)):
+        """SSE endpoint that streams diagnostic output."""
+        edge = db.query(self.model).filter(self.model.id == item_id).first()
+        hostname = edge.hostname if edge else f"edge-{item_id}"
+
+        async def generate():
+            yield console_sse_message(
+                f"Starting diagnostics for \033[1m{hostname}\033[0m...\n\n",
+                css_class="ansi-green",
+            )
+            checks = [
+                ("Checking network connectivity", True),
+                ("Verifying DNS resolution", True),
+                ("Testing tunnel latency", True),
+                ("Validating certificate chain", random.choice([True, True, False])),
+                ("Checking firmware version", True),
+                ("Scanning open ports", True),
+                ("Verifying policy sync", True),
+                ("Testing HA failover", random.choice([True, False])),
+            ]
+            for step, success in checks:
+                await asyncio.sleep(random.uniform(0.3, 1.0))
+                if success:
+                    yield console_sse_message(f"  \033[32m✓\033[0m {step}\n")
+                else:
+                    yield console_sse_message(f"  \033[33m⚠\033[0m {step} — \033[33mwarning\033[0m\n")
+
+            await asyncio.sleep(0.5)
+            yield console_sse_message(
+                f"\n\033[1mDiagnostics complete.\033[0m\n",
+                css_class="ansi-green",
+            )
+
+        return StreamingResponse(generate(), media_type="text/event-stream")
 
     @CRUDView.endpoint("/{name}/bulk-reset", methods=["POST"], response_class=HTMLResponse)
     async def bulk_reset(self, request: Request, db: Session = Depends(get_db)):

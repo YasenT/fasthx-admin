@@ -268,6 +268,224 @@ def modal_response(
     return HTMLResponse(content, status_code=status_code, headers=headers)
 
 
+# ---------------------------------------------------------------------------
+# ANSI → HTML conversion
+# ---------------------------------------------------------------------------
+
+_ANSI_SGR_RE = None  # lazy-compiled regex
+
+_ANSI_FG_MAP = {
+    "30": "ansi-black",   "31": "ansi-red",      "32": "ansi-green",
+    "33": "ansi-yellow",  "34": "ansi-blue",      "35": "ansi-magenta",
+    "36": "ansi-cyan",    "37": "ansi-white",
+    "90": "ansi-bright-black",  "91": "ansi-bright-red",
+    "92": "ansi-bright-green",  "93": "ansi-bright-yellow",
+    "94": "ansi-bright-blue",   "95": "ansi-bright-magenta",
+    "96": "ansi-bright-cyan",   "97": "ansi-bright-white",
+}
+
+_ANSI_STYLE_MAP = {
+    "1": "ansi-bold",
+    "3": "ansi-italic",
+    "4": "ansi-underline",
+}
+
+
+def ansi_to_html(text: str) -> str:
+    """Convert ANSI SGR escape sequences in *text* to ``<span>`` elements.
+
+    Supports foreground colours (30-37, 90-97), bold (1), italic (3),
+    underline (4), and reset (0).  The text content is HTML-escaped.
+    """
+    import html as html_mod
+    import re
+
+    global _ANSI_SGR_RE
+    if _ANSI_SGR_RE is None:
+        _ANSI_SGR_RE = re.compile(r"\x1b\[([0-9;]*)m")
+
+    parts: List[str] = []
+    open_spans = 0
+    last = 0
+
+    for match in _ANSI_SGR_RE.finditer(text):
+        # Append escaped text before this escape sequence
+        parts.append(html_mod.escape(text[last:match.start()]))
+        last = match.end()
+
+        codes = match.group(1).split(";") if match.group(1) else ["0"]
+        for code in codes:
+            if code == "0" or code == "":
+                # Reset — close all open spans
+                parts.append("</span>" * open_spans)
+                open_spans = 0
+            elif code in _ANSI_FG_MAP:
+                parts.append(f'<span class="{_ANSI_FG_MAP[code]}">')
+                open_spans += 1
+            elif code in _ANSI_STYLE_MAP:
+                parts.append(f'<span class="{_ANSI_STYLE_MAP[code]}">')
+                open_spans += 1
+
+    # Remaining text
+    parts.append(html_mod.escape(text[last:]))
+    # Close any unclosed spans
+    parts.append("</span>" * open_spans)
+    return "".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Terminal console response
+# ---------------------------------------------------------------------------
+
+def console_response(
+    title: str,
+    output: str,
+    *,
+    input_enabled: bool = False,
+    input_action: Optional[str] = None,
+    input_placeholder: str = "$ ",
+    stream_url: Optional[str] = None,
+    stream_event: str = "output",
+    ansi: bool = True,
+    size: str = "modal-xl",
+    status_code: int = 200,
+) -> HTMLResponse:
+    """Return an HTMLResponse that renders a terminal console inside the admin modal.
+
+    The console is a dark, monospace, auto-scrolling output area.  It supports
+    static output, SSE streaming, and optional command input.
+
+    Usage examples::
+
+        # Static log output
+        return console_response("Logs", log_text)
+
+        # Streaming output via SSE
+        return console_response("Deploy", "", stream_url="/deploy/stream")
+
+        # Interactive shell
+        return console_response("Shell", "Ready.\\n",
+                                input_enabled=True, input_action="/shell/exec")
+
+    Args:
+        title: Console header title (auto-escaped).
+        output: Initial text content for the console.  If *ansi* is True,
+            ANSI escape codes are converted to coloured ``<span>`` elements.
+        input_enabled: Show a command input prompt in the footer.
+        input_action: ``hx-post`` URL for the input form (required when
+            *input_enabled* is True).
+        input_placeholder: Placeholder text for the input field.
+        stream_url: SSE endpoint URL.  When set, new ``<pre>`` fragments are
+            appended to the console output as they arrive.
+        stream_event: SSE event name to listen for (default ``"output"``).
+        ansi: Auto-convert ANSI escape codes in *output* (default True).
+        size: Bootstrap modal size class (default ``"modal-xl"``).
+        status_code: HTTP status code (default 200).
+    """
+    import html as html_mod
+
+    safe_title = html_mod.escape(title)
+    processed = ansi_to_html(output) if ansi else html_mod.escape(output)
+
+    # Build the output area
+    sse_attrs = ""
+    if stream_url:
+        sse_attrs = (
+            f' hx-ext="sse" sse-connect="{html_mod.escape(stream_url)}"'
+            f' sse-swap="{html_mod.escape(stream_event)}"'
+            f' hx-swap="beforeend scroll:bottom"'
+        )
+
+    output_html = (
+        f'<div class="console-output" id="console-output"{sse_attrs}>'
+        f"<pre>{processed}</pre>"
+        f"</div>"
+    )
+
+    # Build footer
+    if input_enabled and input_action:
+        safe_action = html_mod.escape(input_action)
+        safe_placeholder = html_mod.escape(input_placeholder)
+        footer_html = (
+            f'<div class="modal-footer">'
+            f'<form class="console-input-form" hx-post="{safe_action}"'
+            f' hx-target="#console-output" hx-swap="beforeend scroll:bottom"'
+            f' hx-on::after-request="this.reset()">'
+            f'<input type="text" name="command" placeholder="{safe_placeholder}"'
+            f' autocomplete="off" autofocus>'
+            f'<button type="submit"><i class="bi bi-arrow-return-left"></i></button>'
+            f"</form></div>"
+        )
+    else:
+        footer_html = (
+            '<div class="modal-footer">'
+            '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>'
+            "</div>"
+        )
+
+    content = (
+        f'<div class="console-modal">'
+        f'<div class="modal-header">'
+        f'<h5 class="modal-title" id="admin-modal-title">'
+        f'<i class="bi bi-terminal"></i> {safe_title}</h5>'
+        f'<button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>'
+        f"</div>"
+        f'<div class="modal-body">{output_html}</div>'
+        f"{footer_html}"
+        f"</div>"
+    )
+
+    trigger_data: Dict[str, Any] = {}
+    if size:
+        trigger_data["size"] = size
+
+    headers: Dict[str, str] = {
+        "HX-Trigger": json.dumps({"showConsole": trigger_data}),
+        "HX-Retarget": "#admin-modal .modal-content",
+        "HX-Reswap": "innerHTML",
+    }
+
+    return HTMLResponse(content, status_code=status_code, headers=headers)
+
+
+def console_sse_message(
+    text: str,
+    *,
+    event: str = "output",
+    ansi: bool = True,
+    css_class: str = "",
+) -> str:
+    """Format a single SSE message for use with :func:`console_response` streaming.
+
+    Use this inside a ``StreamingResponse`` generator::
+
+        async def stream():
+            yield console_sse_message("Starting...\\n", css_class="ansi-green")
+            async for line in run_command():
+                yield console_sse_message(line)
+            yield console_sse_message("Done.\\n", css_class="ansi-green")
+
+        return StreamingResponse(stream(), media_type="text/event-stream")
+
+    Args:
+        text: The text content for this message.
+        event: SSE event name (must match *stream_event* in :func:`console_response`).
+        ansi: Convert ANSI escape codes to HTML spans (default True).
+        css_class: Optional CSS class(es) to add to the ``<pre>`` element.
+    """
+    import html as html_mod
+
+    processed = ansi_to_html(text) if ansi else html_mod.escape(text)
+    cls_attr = f' class="{html_mod.escape(css_class)}"' if css_class else ""
+    html_fragment = f"<pre{cls_attr}>{processed}</pre>"
+
+    # SSE format: each data line must be prefixed with "data: "
+    # Multi-line data needs each line prefixed
+    lines = html_fragment.split("\n")
+    data_lines = "\n".join(f"data: {line}" for line in lines)
+    return f"event: {event}\n{data_lines}\n\n"
+
+
 def celery_send_task(model, namespace:str, task_name:str) -> HTMLResponse:
     """ Helper for sending a Celery task from a CRUDView endpoint, with toast response."""
 

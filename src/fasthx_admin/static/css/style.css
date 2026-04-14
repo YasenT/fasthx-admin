@@ -958,3 +958,127 @@ code {
     background-color: var(--accent) !important;
     color: #fff !important;
 }
+
+/* ---- Terminal Console ---- */
+
+.console-output {
+    background: #0d1117;
+    color: #c9d1d9;
+    font-family: 'SFMono-Regular', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    padding: 1rem;
+    min-height: 300px;
+    max-height: 70vh;
+    overflow-y: auto;
+    overflow-x: auto;
+    border-radius: 0;
+}
+
+.console-output pre {
+    margin: 0;
+    padding: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* Force dark terminal regardless of theme */
+[data-bs-theme="light"] .console-output {
+    background: #0d1117;
+    color: #c9d1d9;
+}
+
+/* ANSI color classes */
+.ansi-bold { font-weight: 700; }
+.ansi-italic { font-style: italic; }
+.ansi-underline { text-decoration: underline; }
+.ansi-black { color: #484f58; }
+.ansi-red { color: #ff7b72; }
+.ansi-green { color: #7ee787; }
+.ansi-yellow { color: #e3b341; }
+.ansi-blue { color: #79c0ff; }
+.ansi-magenta { color: #d2a8ff; }
+.ansi-cyan { color: #a5d6ff; }
+.ansi-white { color: #c9d1d9; }
+.ansi-bright-black { color: #6e7681; }
+.ansi-bright-red { color: #ffa198; }
+.ansi-bright-green { color: #56d364; }
+.ansi-bright-yellow { color: #e3b341; }
+.ansi-bright-blue { color: #79c0ff; }
+.ansi-bright-magenta { color: #d2a8ff; }
+.ansi-bright-cyan { color: #b6e3ff; }
+.ansi-bright-white { color: #ffffff; }
+
+/* Console input prompt */
+.console-input-form {
+    display: flex;
+    gap: 0;
+    background: #0d1117;
+    border-top: 1px solid #21262d;
+    padding: 0;
+}
+
+.console-input-form input {
+    background: #0d1117;
+    color: #c9d1d9;
+    border: none;
+    font-family: 'SFMono-Regular', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.8125rem;
+    padding: 0.5rem 0.75rem;
+    flex: 1;
+    outline: none;
+}
+
+.console-input-form input::placeholder {
+    color: #6e7681;
+}
+
+.console-input-form input:focus {
+    box-shadow: none;
+}
+
+.console-input-form button {
+    background: transparent;
+    border: none;
+    color: #7ee787;
+    padding: 0.5rem 0.75rem;
+    cursor: pointer;
+}
+
+/* Modal overrides for console mode */
+.console-modal .modal-body {
+    padding: 0;
+}
+
+.console-modal .modal-footer {
+    padding: 0;
+    border-top: none;
+}
+
+.console-modal .modal-header {
+    background: #0d1117;
+    border-bottom: 1px solid #21262d;
+}
+
+.console-modal .modal-header .modal-title {
+    color: #c9d1d9;
+    font-family: 'SFMono-Regular', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    font-size: 0.875rem;
+}
+
+.console-modal .modal-header .btn-close {
+    filter: invert(1);
+}
+
+/* Force dark console header in light theme */
+[data-bs-theme="light"] .console-modal .modal-header {
+    background: #0d1117;
+    border-bottom: 1px solid #21262d;
+}
+
+[data-bs-theme="light"] .console-modal .modal-header .modal-title {
+    color: #c9d1d9;
+}

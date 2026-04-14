@@ -1231,6 +1231,146 @@ showModal({ size: 'modal-lg' });    // Open with large size
 
 ---
 
+## Terminal Console
+
+fasthx-admin includes a terminal console widget — a dark, monospace, scrollable output area inside a modal. Use it for log viewing, streaming command output, script runners, and interactive shells.
+
+### console_response helper
+
+Use `console_response()` in custom endpoints to display terminal-style output:
+
+```python
+from fasthx_admin import CRUDView, console_response
+
+class EdgeView(CRUDView):
+    model = FortiEdge
+
+    row_actions = [
+        {
+            "label": "Logs",
+            "icon": "terminal",
+            "hx_get": "/edges/{id}/logs",
+        },
+    ]
+
+    @CRUDView.endpoint("/{name}/{item_id}/logs", methods=["GET"])
+    async def view_logs(self, request: Request, item_id: int, db: Session = Depends(get_db)):
+        item = db.query(self.model).filter(self.model.id == item_id).first()
+        if not item:
+            return HTMLResponse("Not found", status_code=404)
+
+        log_text = f"[INFO] Device {item.hostname} booted\n[OK] Services started\n"
+        return console_response(
+            title=f"Logs — {item.hostname}",
+            output=log_text,
+        )
+```
+
+### Streaming output via SSE
+
+For real-time output, point the console at an SSE endpoint using `stream_url`. Use `console_sse_message()` to format each line:
+
+```python
+from fastapi.responses import StreamingResponse
+from fasthx_admin import console_response, console_sse_message
+
+@CRUDView.endpoint("/{name}/{item_id}/run-check", methods=["POST"])
+async def run_check(self, request: Request, item_id: int, db: Session = Depends(get_db)):
+    return console_response(
+        title="Running diagnostics...",
+        output="",
+        stream_url=f"/edges/{item_id}/check-stream",
+    )
+
+@CRUDView.endpoint("/{name}/{item_id}/check-stream", methods=["GET"])
+async def check_stream(self, request: Request, item_id: int):
+    async def generate():
+        yield console_sse_message("Starting diagnostics...\n", css_class="ansi-green")
+        for step in ["Checking connectivity", "Verifying config", "Running tests"]:
+            await asyncio.sleep(1)
+            yield console_sse_message(f"  {step}... OK\n")
+        yield console_sse_message("\nAll checks passed.\n", css_class="ansi-green")
+    return StreamingResponse(generate(), media_type="text/event-stream")
+```
+
+### Interactive input
+
+Enable a command prompt by setting `input_enabled=True`. The form POSTs to `input_action` and appends the response to the output area:
+
+```python
+@CRUDView.endpoint("/{name}/shell", methods=["GET"])
+async def admin_shell(self, request: Request):
+    return console_response(
+        title="Admin Shell",
+        output="Ready.\n",
+        input_enabled=True,
+        input_action=f"/{self.name}/shell/exec",
+    )
+
+@CRUDView.endpoint("/{name}/shell/exec", methods=["POST"])
+async def shell_exec(self, request: Request):
+    import html
+    form = await request.form()
+    cmd = form.get("command", "")
+    result = f"echo: {cmd}"
+    return HTMLResponse(f"<pre>$ {html.escape(cmd)}\n{html.escape(result)}\n</pre>")
+```
+
+### ANSI colour support
+
+Console output supports ANSI escape codes for coloured text. Codes are converted server-side to CSS classes:
+
+```python
+from fasthx_admin import ansi_to_html
+
+# In your output:
+text = "\033[32mSuccess\033[0m — \033[1;31mErrors: 0\033[0m"
+return console_response("Results", text)  # ansi=True by default
+```
+
+Supported codes: colours 30-37 (standard), 90-97 (bright), bold (1), italic (3), underline (4), reset (0).
+
+### Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `title` | Console header title (auto-escaped) |
+| `output` | Initial text content (ANSI codes converted when `ansi=True`) |
+| `input_enabled` | Show a command input prompt (default `False`) |
+| `input_action` | `hx-post` URL for the input form (required when `input_enabled=True`) |
+| `input_placeholder` | Placeholder text for the input field (default `"$ "`) |
+| `stream_url` | SSE endpoint URL for streaming output |
+| `stream_event` | SSE event name to listen for (default `"output"`) |
+| `ansi` | Auto-convert ANSI escape codes (default `True`) |
+| `size` | Modal size class (default `"modal-xl"`) |
+| `status_code` | HTTP status code (default 200) |
+
+### console_sse_message
+
+| Parameter | Description |
+|-----------|-------------|
+| `text` | Text content for this SSE message |
+| `event` | SSE event name — must match `stream_event` in `console_response` (default `"output"`) |
+| `ansi` | Convert ANSI codes to HTML (default `True`) |
+| `css_class` | Optional CSS class(es) for the `<pre>` element (e.g. `"ansi-green"`) |
+
+### How it works
+
+1. `console_response()` returns HTML with a `.console-output` area inside the existing `#admin-modal`
+2. `HX-Trigger: showConsole` tells client JS to open the modal and start auto-scrolling
+3. For streaming: the HTMX SSE extension connects to `stream_url` and appends `<pre>` fragments
+4. For input: the form POSTs to `input_action` and appends the response to the output area
+5. SSE connections are automatically cleaned up when the modal is closed
+
+### JavaScript API
+
+```js
+showConsole();                        // Open with current content
+showConsole({ size: 'modal-xl' });    // Open with extra-large size
+```
+
+---
+
 ## Validation
 
 Raise `ValidationError` inside `on_model_change()` to abort a create or edit. The form re-renders with the user's values preserved and a danger toast shows the error message.
