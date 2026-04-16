@@ -727,6 +727,8 @@ class CRUDView:
     edit_template = "form.html"
     allowed_users = None
     allowed_groups = None
+    audit_log = False
+    audit_log_exclude = None
 
     def __init__(self, templates):
         model = self.model
@@ -1582,6 +1584,12 @@ class CRUDView:
             else:
                 error_msg = None
                 view.after_model_change(item, form_data, is_new=True, db=db, request=request)
+                view._audit_emit(
+                    action="create",
+                    item=item,
+                    request=request,
+                    data=view._audit_snapshot(item),
+                )
             if error_msg:
                 form_fields = view._prepare_form_fields(db, item)
                 return templates.TemplateResponse(view.create_template, {
@@ -1677,6 +1685,7 @@ class CRUDView:
                 return HTMLResponse("Not found", status_code=404)
 
             form_data = await request.form()
+            old_snapshot = view._audit_snapshot(item) if view.audit_log else None
             try:
                 view._apply_form_data(item, form_data)
                 view.on_model_change(item, form_data, is_new=False, db=db, request=request)
@@ -1693,6 +1702,18 @@ class CRUDView:
             else:
                 error_msg = None
                 view.after_model_change(item, form_data, is_new=False, db=db, request=request)
+                if view.audit_log:
+                    new_snapshot = view._audit_snapshot(item)
+                    changed_keys = [k for k, v in new_snapshot.items() if old_snapshot.get(k) != v]
+                    view._audit_emit(
+                        action="update",
+                        item=item,
+                        request=request,
+                        data={
+                            "old": {k: old_snapshot.get(k) for k in changed_keys},
+                            "new": {k: new_snapshot[k] for k in changed_keys},
+                        },
+                    )
             if error_msg:
                 form_fields = view._prepare_form_fields(db, item)
                 return templates.TemplateResponse(view.edit_template, {
@@ -1726,6 +1747,8 @@ class CRUDView:
 
             item = db.query(model).filter(getattr(model, view.pk_field) == item_id).first()
             if item:
+                pre_snapshot = view._audit_snapshot(item) if view.audit_log else None
+                pre_item_id = getattr(item, view.pk_field, None)
                 try:
                     view.on_model_delete(item, db=db)
                     db.delete(item)
@@ -1741,6 +1764,13 @@ class CRUDView:
                     return RedirectResponse(f"/{view.name}", status_code=303)
                 else:
                     view.after_model_delete(item, db=db)
+                    view._audit_emit(
+                        action="delete",
+                        item=None,
+                        item_id=pre_item_id,
+                        request=request,
+                        data=pre_snapshot or {},
+                    )
 
             if request.headers.get("HX-Request"):
                 return HTMLResponse("")
@@ -1813,6 +1843,60 @@ class CRUDView:
                 col = mapper.columns.get(key)
                 if col is not None and type(col.type).__name__.upper() == "BOOLEAN":
                     setattr(item, key, False)
+
+    def _audit_snapshot(self, item) -> dict:
+        """Capture a dict of column values from a model instance, dropping excluded fields."""
+        if item is None:
+            return {}
+        exclude = set(self.audit_log_exclude or [])
+        try:
+            mapper = inspect(type(item))
+        except Exception:
+            return {}
+        snapshot = {}
+        for col in mapper.columns:
+            key = col.key
+            if key in exclude:
+                continue
+            try:
+                snapshot[key] = getattr(item, key)
+            except Exception:
+                continue
+        return snapshot
+
+    def _audit_emit(self, *, action: str, item, request: Request, data: dict, item_id=None) -> None:
+        """Invoke Admin.audit_logger with a standard event, swallowing errors."""
+        if not self.audit_log:
+            return
+        logger = getattr(Admin, "audit_logger", None)
+        if logger is None:
+            return
+        if item_id is None:
+            try:
+                item_id = getattr(item, self.pk_field, None) if item is not None else None
+            except Exception:
+                item_id = None
+        user = None
+        try:
+            user = get_current_user(request) if request is not None else None
+        except Exception:
+            user = None
+        event = {
+            "action": action,
+            "model_name": self.model.__name__,
+            "view_name": self.name,
+            "item_id": item_id,
+            "user": user,
+            "data": data,
+            "request": request,
+        }
+        try:
+            logger(event)
+        except Exception:
+            import logging
+            logging.getLogger("fasthx_admin.audit").exception(
+                "audit_logger raised; continuing",
+            )
 
     def on_model_change(self, item, form_data, is_new: bool, db: Session, request: Request = None):
         """Called before a model is committed on create or edit.
@@ -1894,6 +1978,7 @@ class Admin:
     """
 
     celery_app: Celery | None = None
+    audit_logger: Callable[[dict], None] | None = None
 
     def __init__(
         self,
@@ -1909,6 +1994,7 @@ class Admin:
         settings_admin_groups: list[str] | None = None,
         settings_admin_users: list[str] | None = None,
         celery_app: Celery | None = None,
+        audit_logger: Callable[[dict], None] | None = None,
     ):
         self.app = app
         self.title = title
@@ -1921,6 +2007,7 @@ class Admin:
         self.settings_admin_groups = settings_admin_groups
         self.settings_admin_users = settings_admin_users
         Admin.celery_app = celery_app
+        Admin.audit_logger = audit_logger
 
         # Set up Jinja2 templates (use built-in if not provided)
         if templates is not None:

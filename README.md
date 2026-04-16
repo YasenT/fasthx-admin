@@ -70,6 +70,7 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
 - [Modals](#modals)
 - [Validation](#validation)
 - [Model Lifecycle Hooks](#model-lifecycle-hooks)
+- [Audit Logging](#audit-logging)
 - [Progress Bar](#progress-bar)
 - [Authentication](#authentication)
 - [AI Chat (Optional)](#ai-chat-optional)
@@ -1440,6 +1441,8 @@ class CustomerView(CRUDView):
         db.commit()
 ```
 
+> For standardized audit logging across many views (with automatic old/new diffing on edits and field-level filtering), see [Audit Logging](#audit-logging).
+
 ### Example: Prevent deletion
 
 ```python
@@ -1515,6 +1518,129 @@ class ServerView(CRUDView):
 1. `on_model_delete()` runs — raise `ValidationError` to abort
 2. `db.delete()` + `db.commit()`
 3. `after_model_delete()` runs
+
+---
+
+## Audit Logging
+
+fasthx-admin ships with a built-in audit log mechanism that fires on successful create, edit, and delete. It is opt-in per view and routes events to a single user-supplied callable, so you can persist them however you like (database, Python `logging`, an external sink).
+
+### Enabling
+
+Register an audit callable on `Admin`, then set `audit_log = True` on each view you want tracked:
+
+```python
+from fasthx_admin import Admin, CRUDView
+
+def audit_logger(event: dict) -> None:
+    # Persist however you like — DB row, log line, message queue, etc.
+    ...
+
+app = FastAPI()
+admin = Admin(app, audit_logger=audit_logger)
+
+class CustomerView(CRUDView):
+    model = Customer
+    audit_log = True
+    audit_log_exclude = ["password_hash"]  # optional — drop sensitive fields
+```
+
+If `audit_logger` is not configured on `Admin`, or `audit_log` is `False` on the view, no audit events fire and there is zero overhead.
+
+### Event shape
+
+The callable receives a single dict per action:
+
+```python
+{
+    "action": "create" | "update" | "delete",
+    "model_name": "Customer",        # __name__ of the model class
+    "view_name": "customers",        # CRUDView.name (URL slug)
+    "item_id": 42,                    # primary key value (pk_field)
+    "user": {...} | None,             # result of get_current_user(request)
+    "data": {...},                    # see below
+    "request": <Request>,             # current FastAPI request
+}
+```
+
+The `data` field varies by action:
+
+| Action | `data` contents |
+|---|---|
+| `create` | Full snapshot of the new row (`{col: value, ...}`) |
+| `update` | `{"old": {...}, "new": {...}}` — **only** columns whose value changed |
+| `delete` | Snapshot of the row captured before deletion |
+
+Columns listed in `audit_log_exclude` are stripped from all snapshots.
+
+### Hook points
+
+Audit events fire *after* the successful-commit branch of each handler:
+
+- **Create:** after `db.commit()` and `after_model_change()` — item has its new primary key.
+- **Update:** snapshots column values before `_apply_form_data()`, diffs against post-commit state, emits only changed fields.
+- **Delete:** snapshots the row before `db.delete()`, emits after `after_model_delete()`.
+
+If `on_model_change` or `on_model_delete` raises `ValidationError`, the transaction rolls back and no audit event fires.
+
+### Failure isolation
+
+Exceptions raised inside your `audit_logger` are caught by the package and written to the `fasthx_admin.audit` logger via `logging.exception`. A broken audit sink will never break the user flow or roll back the user's save.
+
+### Example: writing to a UserLog table
+
+```python
+from datetime import datetime
+from sqlalchemy import Column, Integer, String, DateTime
+from fasthx_admin import Admin, Base, get_db
+
+class UserLog(Base):
+    __tablename__ = "user_log"
+    id = Column(Integer, primary_key=True)
+    username = Column(String)
+    category = Column(String)
+    action = Column(String)
+    log = Column(String)
+    date = Column(DateTime, default=datetime.utcnow)
+
+def audit_logger(event: dict) -> None:
+    user = event.get("user") or {}
+    username = user.get("username") or user.get("preferred_username") or "anonymous"
+    db = next(get_db())
+    try:
+        db.add(UserLog(
+            username=username,
+            category=f"admin.{event['model_name']}",
+            action=event["action"],
+            log=repr(event["data"]),
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+admin = Admin(app, audit_logger=audit_logger)
+```
+
+### Example: routing to Python logging
+
+```python
+import json, logging
+
+audit = logging.getLogger("admin.audit")
+
+def audit_logger(event: dict) -> None:
+    user = (event.get("user") or {}).get("username", "anonymous")
+    audit.info(
+        "%s %s[%s] by %s: %s",
+        event["action"], event["model_name"], event["item_id"], user,
+        json.dumps(event["data"], default=str),
+    )
+```
+
+### When to use `audit_log` vs. lifecycle hooks
+
+- **Use `audit_log`** when you want uniform tracking across many views with a single sink. Opt-in per view via one boolean.
+- **Use `after_model_change` / `after_model_delete`** when the logic is specific to one model (e.g. "only log price changes on Orders") or when you need access to the raw form data. Both mechanisms can be used at the same time.
 
 ---
 
