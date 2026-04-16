@@ -962,7 +962,7 @@ code {
 /* ---- Terminal Console ---- */
 
 .console-output {
-    background: #0d1117;
+    background: #1f1f1f;
     color: #c9d1d9;
     font-family: 'SFMono-Regular', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
     font-size: 0.8125rem;
@@ -987,7 +987,7 @@ code {
 
 /* Force dark terminal regardless of theme */
 [data-bs-theme="light"] .console-output {
-    background: #0d1117;
+    background: #1f1f1f;
     color: #c9d1d9;
 }
 
@@ -1016,13 +1016,13 @@ code {
 .console-input-form {
     display: flex;
     gap: 0;
-    background: #0d1117;
+    background: #1f1f1f;
     border-top: 1px solid #21262d;
     padding: 0;
 }
 
 .console-input-form input {
-    background: #0d1117;
+    background: #1f1f1f;
     color: #c9d1d9;
     border: none;
     font-family: 'SFMono-Regular', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
@@ -1059,7 +1059,7 @@ code {
 }
 
 .console-modal .modal-header {
-    background: #0d1117;
+    background: #1f1f1f;
     border-bottom: 1px solid #21262d;
 }
 
@@ -1075,7 +1075,7 @@ code {
 
 /* Force dark console header in light theme */
 [data-bs-theme="light"] .console-modal .modal-header {
-    background: #0d1117;
+    background: #1f1f1f;
     border-bottom: 1px solid #21262d;
 }
 
