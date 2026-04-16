@@ -486,18 +486,36 @@ def console_sse_message(
     return f"event: {event}\n{data_lines}\n\n"
 
 
-def celery_send_task(model, namespace:str, task_name:str) -> HTMLResponse:
-    """ Helper for sending a Celery task from a CRUDView endpoint, with toast response."""
+def celery_send_task(model, namespace:str, task_name:str, respond:bool=True):
+    """ Helper for sending a Celery task.
+
+    When respond=True (default), returns an HTMLResponse with a toast notification.
+    Use this from endpoint handlers that return an HTTP response to the browser.
+
+    When respond=False, sends the task and returns the AsyncResult directly.
+    Use this from lifecycle hooks (on_model_change, after_model_change, etc.)
+    where there is no HTTP response context.
+    """
 
     if not Admin.celery_app:
-        return toast_response("Celery app not configured", type="danger", status_code=500)
+        if respond:
+            return toast_response("Celery app not configured", type="danger", status_code=500)
+        raise RuntimeError("Celery app not configured")
     try:
-        result = Admin.celery_app.send_task(f"{namespace.lower()}.{task_name}", 
-                                               args=[str(model.id)], 
+        result = Admin.celery_app.send_task(f"{namespace.lower()}.{task_name}",
+                                               args=[str(model.id)],
                                                queue=f"{namespace.lower()}")
-        return toast_response(f"Task {result.id} Queued!", type="success")
+        if respond:
+            return toast_response(f"Task {result.id} Queued!", type="success")
+        return result
     except Exception as e:
-        return toast_response(f"Failed to send task: {str(e)}", type="danger", status_code=500)
+        if respond:
+            return toast_response(f"Failed to send task: {str(e)}", type="danger", status_code=500)
+        raise RuntimeError(
+            f"Failed to send Celery task '{namespace}.{task_name}': {e}. "
+            f"If this was called from a lifecycle hook, use respond=False. "
+            f"If called from an endpoint, check Celery broker connectivity."
+        ) from e
 
 
 def _parse_filter_params(request: Request, column_filters, column_labels=None) -> list:
