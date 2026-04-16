@@ -1557,7 +1557,7 @@ The callable receives a single dict per action:
     "model_name": "Customer",        # __name__ of the model class
     "view_name": "customers",        # CRUDView.name (URL slug)
     "item_id": 42,                    # primary key value (pk_field)
-    "user": {...} | None,             # result of get_current_user(request)
+    "user": {"username": "...", "groups": [...]} | None,  # get_current_user(request)
     "data": {...},                    # see below
     "request": <Request>,             # current FastAPI request
 }
@@ -1605,11 +1605,10 @@ class UserLog(Base):
 
 def audit_logger(event: dict) -> None:
     user = event.get("user") or {}
-    username = user.get("username") or user.get("preferred_username") or "anonymous"
     db = next(get_db())
     try:
         db.add(UserLog(
-            username=username,
+            username=user.get("username", "anonymous"),
             category=f"admin.{event['model_name']}",
             action=event["action"],
             log=repr(event["data"]),
