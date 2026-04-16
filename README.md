@@ -1636,9 +1636,54 @@ def audit_logger(event: dict) -> None:
     )
 ```
 
+### Auditing custom endpoints
+
+The `audit_log = True` flag only covers the built-in create/edit/delete routes. For custom endpoints registered with `@CRUDView.endpoint(...)` there are two opt-in paths:
+
+**Flag on the decorator** — zero-effort auto-logging, fires after a successful return:
+
+```python
+class ServerView(CRUDView):
+    model = Server
+    audit_log = True
+
+    @CRUDView.endpoint("/{name}/{item_id}/reset", methods=["POST"], audit=True)
+    async def reset(self, request: Request, item_id: int, db: Session = Depends(get_db)):
+        ...
+        return HTMLResponse("")
+```
+
+Defaults emitted:
+- `action` = the function name (`"reset"`) — override with `audit_action="..."`.
+- `item_id` = pulled from the `item_id` path param if present.
+- `data` = `{"path_params": {...}, "query_params": {...}}` (body not captured — see below).
+- Fires only on successful return; if the endpoint raises, no event is emitted.
+
+**Explicit `self.audit(...)` call** — when you need to capture before/after snapshots, body data, or control exactly when the event fires:
+
+```python
+@CRUDView.endpoint("/{name}/{item_id}/approve", methods=["POST"])
+async def approve(self, request: Request, item_id: int, db: Session = Depends(get_db)):
+    item = db.query(self.model).get(item_id)
+    old = self._audit_snapshot(item)
+    item.status = "approved"
+    db.commit()
+    self.audit(
+        "approve",
+        item=item,
+        request=request,
+        data={"old": old, "new": self._audit_snapshot(item)},
+    )
+    return HTMLResponse("")
+```
+
+`self.audit(action, *, item=None, request=None, data=None, item_id=None)` is a no-op when `self.audit_log` is False or `Admin.audit_logger` is unset, so leaving the calls in place is free.
+
+**Why not auto-capture request body?** Reading `request.form()` / `request.json()` in the wrapper consumes the stream and conflicts with endpoint code that reads it itself. Path + query params are always safe to inspect; body is the caller's job via `self.audit(...)`.
+
 ### When to use `audit_log` vs. lifecycle hooks
 
-- **Use `audit_log`** when you want uniform tracking across many views with a single sink. Opt-in per view via one boolean.
+- **Use `audit_log`** when you want uniform tracking across many views with a single sink. Opt-in per view via one boolean (covers create/edit/delete); add `audit=True` on custom endpoints to extend it to them.
 - **Use `after_model_change` / `after_model_delete`** when the logic is specific to one model (e.g. "only log price changes on Orders") or when you need access to the raw form data. Both mechanisms can be used at the same time.
 
 ---

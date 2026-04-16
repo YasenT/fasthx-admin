@@ -663,7 +663,14 @@ class CRUDView:
     # --- Endpoint decorator ---
 
     @staticmethod
-    def endpoint(path: str, methods: list[str] | None = None, **route_kwargs):
+    def endpoint(
+        path: str,
+        methods: list[str] | None = None,
+        *,
+        audit: bool = False,
+        audit_action: str | None = None,
+        **route_kwargs,
+    ):
         """Decorator for declaring custom endpoints on a CRUDView subclass.
 
         Usage::
@@ -677,6 +684,13 @@ class CRUDView:
 
         ``{name}`` in the path is replaced with ``self.name`` at init time.
         The ``self`` parameter is bound automatically and hidden from FastAPI.
+
+        Pass ``audit=True`` to emit an audit event after a successful return
+        (requires view-level ``audit_log = True`` and ``Admin(audit_logger=...)``).
+        Defaults: ``action = audit_action or fn.__name__``, ``item_id`` from the
+        ``item_id`` path param if present, ``data = {path_params, query_params}``.
+        Body data is not captured automatically — use ``self.audit(...)`` from
+        inside the endpoint when you need richer payloads.
         """
         if methods is None:
             methods = ["GET"]
@@ -686,6 +700,8 @@ class CRUDView:
                 "path": path,
                 "methods": methods,
                 "route_kwargs": route_kwargs,
+                "audit": audit,
+                "audit_action": audit_action,
             }
             return fn
 
@@ -1306,9 +1322,37 @@ class CRUDView:
                 return_annotation=hints.get("return", sig.return_annotation),
             )
 
+            audit_enabled = bool(meta.get("audit"))
+            audit_action_name = meta.get("audit_action") or fn.__name__
+
             @functools.wraps(fn)
-            async def make_handler(bound_method=bound, **kwargs):
-                return await bound_method(**kwargs)
+            async def make_handler(
+                bound_method=bound,
+                _audit=audit_enabled,
+                _audit_action=audit_action_name,
+                _view=self,
+                **kwargs,
+            ):
+                result = await bound_method(**kwargs)
+                if _audit:
+                    request = kwargs.get("request")
+                    item_id = kwargs.get("item_id")
+                    data = {}
+                    if request is not None:
+                        path_params = dict(getattr(request, "path_params", {}) or {})
+                        query_params = dict(getattr(request, "query_params", {}) or {})
+                        if path_params:
+                            data["path_params"] = path_params
+                        if query_params:
+                            data["query_params"] = query_params
+                    _view._audit_emit(
+                        action=_audit_action,
+                        item=None,
+                        item_id=item_id,
+                        request=request,
+                        data=data,
+                    )
+                return result
 
             make_handler.__signature__ = new_sig
 
@@ -1897,6 +1941,33 @@ class CRUDView:
             logging.getLogger("fasthx_admin.audit").exception(
                 "audit_logger raised; continuing",
             )
+
+    def audit(
+        self,
+        action: str,
+        *,
+        item=None,
+        request: Request = None,
+        data: dict | None = None,
+        item_id=None,
+    ) -> None:
+        """Emit a custom audit event from inside an endpoint body.
+
+        Respects ``self.audit_log`` (no-op when False) and
+        ``Admin.audit_logger`` (no-op when unset). Exceptions raised by the
+        logger are caught + logged, never surfaced to the caller.
+
+        Pass ``item`` to auto-derive ``item_id`` from ``pk_field``; or pass
+        ``item_id`` directly. ``data`` is the payload dict you want logged —
+        callers are responsible for shaping it (e.g. ``{"old": ..., "new": ...}``).
+        """
+        self._audit_emit(
+            action=action,
+            item=item,
+            item_id=item_id,
+            request=request,
+            data=data or {},
+        )
 
     def on_model_change(self, item, form_data, is_new: bool, db: Session, request: Request = None):
         """Called before a model is committed on create or edit.
