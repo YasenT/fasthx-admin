@@ -20,8 +20,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, get_type_hints
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from sqlalchemy import Column, Integer, String, Text, inspect
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from sqlalchemy import Boolean, Column, Float, Integer, String, Text, inspect
 from sqlalchemy.orm import Session
 
 from .database import Base, get_db, get_engine
@@ -323,10 +323,26 @@ class AIChatSettings(Base):
     value = Column(Text)
 
 
+class AIChatConnection(Base):
+    __tablename__ = "fasthx_admin_ai_connections"
+
+    id = Column(Integer, primary_key=True)
+    name = Column(String(255), unique=True, nullable=False)
+    base_url = Column(String(500), nullable=False, default="https://api.openai.com")
+    api_key = Column(Text, default="")
+    model = Column(String(255), nullable=False, default="gpt-4o-mini")
+    temperature = Column(Float, nullable=False, default=0.7)
+    max_tokens = Column(Integer, nullable=False, default=2048)
+    timeout = Column(Float, nullable=False, default=60.0)
+    ssl_verify = Column(Boolean, nullable=False, default=True)
+    is_active = Column(Boolean, nullable=False, default=False)
+
+
 def ensure_ai_tables():
-    """Create the AI settings table if it doesn't exist."""
+    """Create the AI settings tables if they don't exist."""
     engine = get_engine()
     AIChatSettings.__table__.create(bind=engine, checkfirst=True)
+    AIChatConnection.__table__.create(bind=engine, checkfirst=True)
 
 
 def _get_settings(db: Session) -> dict[str, str]:
@@ -431,16 +447,78 @@ def _build_system_prompt(settings: dict[str, str]) -> str:
     return "\n".join(parts)
 
 
-def _build_provider(settings: dict[str, str]) -> AIProvider:
-    """Build an AI provider from settings."""
-    return OpenAICompatibleProvider(
+_LEGACY_CONNECTION_KEYS = {
+    "base_url", "api_key", "model", "temperature",
+    "max_tokens", "timeout", "ssl_verify",
+}
+
+
+def _migrate_legacy_connection(db: Session) -> AIChatConnection | None:
+    """If legacy per-model KV keys exist, seed a 'Default' connection from them.
+
+    Why: earlier versions stored the single connection as KV rows. Preserve user
+    config on upgrade so the chat keeps working without a manual reconfigure.
+    """
+    settings = _get_settings(db)
+    if not any(k in settings for k in _LEGACY_CONNECTION_KEYS):
+        return None
+
+    conn = AIChatConnection(
+        name="Default",
         base_url=settings.get("base_url", "https://api.openai.com"),
         api_key=settings.get("api_key", ""),
         model=settings.get("model", "gpt-4o-mini"),
-        temperature=float(settings.get("temperature", "0.7")),
-        max_tokens=int(settings.get("max_tokens", "2048")),
-        timeout=float(settings.get("timeout", "60")),
+        temperature=float(settings.get("temperature", "0.7") or 0.7),
+        max_tokens=int(settings.get("max_tokens", "2048") or 2048),
+        timeout=float(settings.get("timeout", "60") or 60),
         ssl_verify=settings.get("ssl_verify", "true") == "true",
+        is_active=True,
+    )
+    db.add(conn)
+
+    for key in _LEGACY_CONNECTION_KEYS:
+        row = db.query(AIChatSettings).filter(AIChatSettings.key == key).first()
+        if row:
+            db.delete(row)
+    db.commit()
+    return conn
+
+
+def _get_active_connection(db: Session) -> AIChatConnection | None:
+    """Return the active connection, migrating legacy KV state if needed."""
+    conn = db.query(AIChatConnection).filter(AIChatConnection.is_active.is_(True)).first()
+    if conn:
+        return conn
+
+    any_conn = db.query(AIChatConnection).order_by(AIChatConnection.id).first()
+    if any_conn:
+        any_conn.is_active = True
+        db.commit()
+        return any_conn
+
+    return _migrate_legacy_connection(db)
+
+
+def _set_active_connection(db: Session, conn_id: int) -> None:
+    db.query(AIChatConnection).filter(AIChatConnection.is_active.is_(True)).update(
+        {AIChatConnection.is_active: False}
+    )
+    target = db.query(AIChatConnection).filter(AIChatConnection.id == conn_id).first()
+    if target:
+        target.is_active = True
+    db.commit()
+
+
+def _build_provider(conn: AIChatConnection) -> AIProvider:
+    """Build an AI provider from a connection row."""
+    return OpenAICompatibleProvider(
+        base_url=conn.base_url or "https://api.openai.com",
+        api_key=conn.api_key or "",
+        model=conn.model or "gpt-4o-mini",
+        temperature=float(conn.temperature if conn.temperature is not None else 0.7),
+        max_tokens=int(conn.max_tokens if conn.max_tokens is not None else 2048),
+        timeout=float(conn.timeout if conn.timeout is not None else 60.0),
+        ssl_verify=bool(conn.ssl_verify),
     )
 
 
@@ -465,7 +543,13 @@ def create_ai_chat_router(admin) -> APIRouter:
             session_id = str(uuid.uuid4())
         history = _get_history(session_id)
 
-        provider = _build_provider(settings)
+        conn = _get_active_connection(db)
+        if conn is None:
+            return JSONResponse(
+                {"error": "No AI connection configured. Add one in AI Settings."},
+                status_code=400,
+            )
+        provider = _build_provider(conn)
         system_prompt = _build_system_prompt(settings)
 
         # Determine enabled tools
@@ -512,46 +596,128 @@ def create_ai_chat_router(admin) -> APIRouter:
         history = _get_history(session_id)
         return JSONResponse({"messages": history})
 
-    @router.get("/settings", response_class=HTMLResponse)
-    async def settings_page(request: Request, db: Session = Depends(get_db)):
+    def _render_settings(request, db, save_success=False):
+        _get_active_connection(db)  # trigger legacy migration if needed
         settings = _get_settings(db)
-        provider = OpenAICompatibleProvider()
+        connections = db.query(AIChatConnection).order_by(AIChatConnection.name).all()
         return templates.TemplateResponse("ai_settings.html", {
             "request": request,
             "settings": settings,
-            "config_fields": provider.get_config_fields(),
+            "connections": connections,
             "active_page": "ai_settings",
+            "save_success": save_success,
         })
+
+    @router.get("/settings", response_class=HTMLResponse)
+    async def settings_page(request: Request, db: Session = Depends(get_db)):
+        return _render_settings(request, db)
 
     @router.post("/settings", response_class=HTMLResponse)
     async def save_settings(request: Request, db: Session = Depends(get_db)):
         form = await request.form()
-        settings_to_save = {}
-        checkbox_keys = {"enabled", "ssl_verify"}
-        for key in ["enabled", "base_url", "api_key", "model", "temperature",
-                     "max_tokens", "timeout", "ssl_verify", "system_prompt"]:
-            value = form.get(key, "")
-            if key in checkbox_keys:
-                value = "true" if value else "false"
-            settings_to_save[key] = str(value)
-
-        # Don't overwrite api_key if masked placeholder sent
-        if settings_to_save.get("api_key") == "********":
-            existing = _get_settings(db)
-            settings_to_save["api_key"] = existing.get("api_key", "")
-
+        settings_to_save = {
+            "enabled": "true" if form.get("enabled") else "false",
+            "system_prompt": str(form.get("system_prompt", "")),
+        }
         _save_settings(db, settings_to_save)
         _invalidate_settings_cache()
+        return _render_settings(request, db, save_success=True)
 
-        settings = _get_settings(db)
-        provider = OpenAICompatibleProvider()
-        return templates.TemplateResponse("ai_settings.html", {
+    def _render_connection_form(request, conn=None, error=None):
+        return templates.TemplateResponse("ai_connection_form.html", {
             "request": request,
-            "settings": settings,
-            "config_fields": provider.get_config_fields(),
+            "connection": conn,
+            "error": error,
             "active_page": "ai_settings",
-            "save_success": True,
         })
+
+    def _connection_from_form(form, existing: AIChatConnection | None) -> tuple[AIChatConnection | None, str | None]:
+        name = (form.get("name") or "").strip()
+        if not name:
+            return None, "Name is required."
+
+        conn = existing or AIChatConnection()
+        conn.name = name
+        conn.base_url = (form.get("base_url") or "https://api.openai.com").strip()
+        api_key = form.get("api_key", "")
+        if api_key != "********":
+            conn.api_key = api_key
+        conn.model = (form.get("model") or "gpt-4o-mini").strip()
+        try:
+            conn.temperature = float(form.get("temperature") or 0.7)
+            conn.max_tokens = int(form.get("max_tokens") or 2048)
+            conn.timeout = float(form.get("timeout") or 60)
+        except ValueError:
+            return None, "Temperature, max tokens, and timeout must be numeric."
+        conn.ssl_verify = form.get("ssl_verify") == "on"
+        return conn, None
+
+    @router.get("/settings/connections/new", response_class=HTMLResponse)
+    async def new_connection(request: Request):
+        return _render_connection_form(request)
+
+    @router.post("/settings/connections")
+    async def create_connection(request: Request, db: Session = Depends(get_db)):
+        form = await request.form()
+        conn, error = _connection_from_form(form, None)
+        if error:
+            return _render_connection_form(request, error=error)
+        # First connection auto-activates
+        if db.query(AIChatConnection).count() == 0:
+            conn.is_active = True
+        try:
+            db.add(conn)
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            return _render_connection_form(request, error=f"Could not save: {e}")
+        _invalidate_settings_cache()
+        return RedirectResponse("/ai/settings", status_code=303)
+
+    @router.get("/settings/connections/{conn_id}/edit", response_class=HTMLResponse)
+    async def edit_connection(conn_id: int, request: Request, db: Session = Depends(get_db)):
+        conn = db.query(AIChatConnection).filter(AIChatConnection.id == conn_id).first()
+        if not conn:
+            return HTMLResponse("Connection not found", status_code=404)
+        return _render_connection_form(request, conn=conn)
+
+    @router.post("/settings/connections/{conn_id}")
+    async def update_connection(conn_id: int, request: Request, db: Session = Depends(get_db)):
+        conn = db.query(AIChatConnection).filter(AIChatConnection.id == conn_id).first()
+        if not conn:
+            return HTMLResponse("Connection not found", status_code=404)
+        form = await request.form()
+        updated, error = _connection_from_form(form, conn)
+        if error:
+            return _render_connection_form(request, conn=conn, error=error)
+        try:
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            return _render_connection_form(request, conn=conn, error=f"Could not save: {e}")
+        _invalidate_settings_cache()
+        return RedirectResponse("/ai/settings", status_code=303)
+
+    @router.post("/settings/connections/{conn_id}/activate")
+    async def activate_connection(conn_id: int, db: Session = Depends(get_db)):
+        _set_active_connection(db, conn_id)
+        _invalidate_settings_cache()
+        return RedirectResponse("/ai/settings", status_code=303)
+
+    @router.post("/settings/connections/{conn_id}/delete")
+    async def delete_connection(conn_id: int, db: Session = Depends(get_db)):
+        conn = db.query(AIChatConnection).filter(AIChatConnection.id == conn_id).first()
+        if conn:
+            was_active = conn.is_active
+            db.delete(conn)
+            db.commit()
+            if was_active:
+                fallback = db.query(AIChatConnection).order_by(AIChatConnection.id).first()
+                if fallback:
+                    fallback.is_active = True
+                    db.commit()
+        _invalidate_settings_cache()
+        return RedirectResponse("/ai/settings", status_code=303)
 
     @router.get("/settings/context", response_class=HTMLResponse)
     async def context_settings_page(request: Request, db: Session = Depends(get_db)):

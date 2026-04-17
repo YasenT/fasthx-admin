@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}{% if connection %}Edit{% else %}Add{% endif %} Connection{% endblock %}
+{% block page_title %}{% if connection %}Edit Connection{% else %}Add Connection{% endif %}{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="mb-3">
+        <a href="/ai/settings" class="btn btn-outline-secondary btn-sm">
+            <i class="bi bi-arrow-left"></i> Back to AI Settings
+        </a>
+    </div>
+
+    {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" action="{% if connection %}/ai/settings/connections/{{ connection.id }}{% else %}/ai/settings/connections{% endif %}">
+        <div class="card">
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="name" class="form-label">Name <span class="text-danger">*</span></label>
+                    <input type="text" class="form-control" id="name" name="name" required
+                           value="{{ connection.name if connection else '' }}"
+                           placeholder="e.g. OpenAI GPT-4o, Local Llama, Claude Sonnet">
+                    <div class="form-text">A label to identify this connection.</div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="base_url" class="form-label">API Base URL</label>
+                    <input type="text" class="form-control" id="base_url" name="base_url"
+                           value="{{ connection.base_url if connection else 'https://api.openai.com' }}"
+                           placeholder="https://api.openai.com">
+                    <div class="form-text">OpenAI-compatible endpoint (OpenAI, vLLM, Ollama, LiteLLM, etc.)</div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="api_key" class="form-label">API Key</label>
+                    <div class="input-group">
+                        <input type="password" class="form-control" id="api_key" name="api_key"
+                               value="{% if connection and connection.api_key %}********{% endif %}"
+                               placeholder="sk-...">
+                        <button class="btn btn-outline-secondary" type="button"
+                                onclick="this.previousElementSibling.type = this.previousElementSibling.type === 'password' ? 'text' : 'password'">
+                            <i class="bi bi-eye"></i>
+                        </button>
+                    </div>
+                    <div class="form-text">Leave as <code>********</code> to keep the existing key.</div>
+                </div>
+
+                <div class="mb-3">
+                    <label for="model" class="form-label">Model</label>
+                    <input type="text" class="form-control" id="model" name="model"
+                           value="{{ connection.model if connection else 'gpt-4o-mini' }}"
+                           placeholder="gpt-4o-mini">
+                </div>
+
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <label for="temperature" class="form-label">Temperature</label>
+                        <input type="number" class="form-control" id="temperature" name="temperature"
+                               value="{{ connection.temperature if connection else '0.7' }}"
+                               step="0.1" min="0" max="2">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label for="max_tokens" class="form-label">Max Tokens</label>
+                        <input type="number" class="form-control" id="max_tokens" name="max_tokens"
+                               value="{{ connection.max_tokens if connection else '2048' }}">
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <label for="timeout" class="form-label">Timeout (seconds)</label>
+                        <input type="number" class="form-control" id="timeout" name="timeout"
+                               value="{{ connection.timeout if connection else '60' }}">
+                    </div>
+                </div>
+
+                <div class="form-check form-switch mb-3">
+                    <input class="form-check-input" type="checkbox" id="ssl_verify" name="ssl_verify"
+                           {% if (connection and connection.ssl_verify) or not connection %}checked{% endif %}>
+                    <label class="form-check-label" for="ssl_verify">Verify SSL certificates</label>
+                    <div class="form-text">Disable for self-signed certificates (e.g. internal vLLM/Ollama endpoints).</div>
+                </div>
+            </div>
+            <div class="card-footer d-flex justify-content-between">
+                <a href="/ai/settings" class="btn btn-outline-secondary">Cancel</a>
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-check-lg me-1"></i> {% if connection %}Update{% else %}Create{% endif %} Connection
+                </button>
+            </div>
+        </div>
+    </form>
+</div>
+{% endblock %}

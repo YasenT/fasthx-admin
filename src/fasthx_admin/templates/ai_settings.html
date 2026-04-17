@@ -20,125 +20,102 @@
         </div>
     </div>
 
-    <form method="post" action="/ai/settings">
-        <div class="accordion" id="aiSettingsAccordion">
-            <!-- General -->
-            <div class="accordion-item">
-                <h2 class="accordion-header">
-                    <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseGeneral">
-                        <i class="bi bi-gear me-2"></i> General
-                    </button>
-                </h2>
-                <div id="collapseGeneral" class="accordion-collapse collapse show" data-bs-parent="#aiSettingsAccordion">
-                    <div class="accordion-body">
+    <div class="accordion" id="aiSettingsAccordion">
+        <!-- General -->
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseGeneral">
+                    <i class="bi bi-gear me-2"></i> General
+                </button>
+            </h2>
+            <div id="collapseGeneral" class="accordion-collapse collapse show" data-bs-parent="#aiSettingsAccordion">
+                <div class="accordion-body">
+                    <form method="post" action="/ai/settings">
                         <div class="form-check form-switch mb-3">
                             <input class="form-check-input" type="checkbox" id="enabled" name="enabled"
                                    {% if settings.get('enabled') == 'true' %}checked{% endif %}>
                             <label class="form-check-label" for="enabled">Enable AI Chat Widget</label>
                         </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Connection -->
-            <div class="accordion-item">
-                <h2 class="accordion-header">
-                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseConnection">
-                        <i class="bi bi-plug me-2"></i> Connection
-                    </button>
-                </h2>
-                <div id="collapseConnection" class="accordion-collapse collapse" data-bs-parent="#aiSettingsAccordion">
-                    <div class="accordion-body">
                         <div class="mb-3">
-                            <label for="base_url" class="form-label">API Base URL</label>
-                            <input type="text" class="form-control" id="base_url" name="base_url"
-                                   value="{{ settings.get('base_url', 'https://api.openai.com') }}"
-                                   placeholder="https://api.openai.com">
-                            <div class="form-text">OpenAI-compatible endpoint (OpenAI, vLLM, Ollama, LiteLLM, etc.)</div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="api_key" class="form-label">API Key</label>
-                            <div class="input-group">
-                                <input type="password" class="form-control" id="api_key" name="api_key"
-                                       value="{% if settings.get('api_key') %}********{% endif %}"
-                                       placeholder="sk-...">
-                                <button class="btn btn-outline-secondary" type="button"
-                                        onclick="this.previousElementSibling.type = this.previousElementSibling.type === 'password' ? 'text' : 'password'">
-                                    <i class="bi bi-eye"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="mb-3">
-                            <label for="model" class="form-label">Model</label>
-                            <input type="text" class="form-control" id="model" name="model"
-                                   value="{{ settings.get('model', 'gpt-4o-mini') }}"
-                                   placeholder="gpt-4o-mini">
-                        </div>
-                        <div class="form-check form-switch mb-3">
-                            <input class="form-check-input" type="checkbox" id="ssl_verify" name="ssl_verify"
-                                   {% if settings.get('ssl_verify', 'true') == 'true' %}checked{% endif %}>
-                            <label class="form-check-label" for="ssl_verify">Verify SSL certificates</label>
-                            <div class="form-text">Disable for self-signed certificates (e.g. internal vLLM/Ollama endpoints)</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Parameters -->
-            <div class="accordion-item">
-                <h2 class="accordion-header">
-                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseParams">
-                        <i class="bi bi-sliders me-2"></i> Parameters
-                    </button>
-                </h2>
-                <div id="collapseParams" class="accordion-collapse collapse" data-bs-parent="#aiSettingsAccordion">
-                    <div class="accordion-body">
-                        <div class="row">
-                            <div class="col-md-4 mb-3">
-                                <label for="temperature" class="form-label">Temperature</label>
-                                <input type="number" class="form-control" id="temperature" name="temperature"
-                                       value="{{ settings.get('temperature', '0.7') }}"
-                                       step="0.1" min="0" max="2">
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label for="max_tokens" class="form-label">Max Tokens</label>
-                                <input type="number" class="form-control" id="max_tokens" name="max_tokens"
-                                       value="{{ settings.get('max_tokens', '2048') }}">
-                            </div>
-                            <div class="col-md-4 mb-3">
-                                <label for="timeout" class="form-label">Timeout (seconds)</label>
-                                <input type="number" class="form-control" id="timeout" name="timeout"
-                                       value="{{ settings.get('timeout', '60') }}">
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- System Prompt -->
-            <div class="accordion-item">
-                <h2 class="accordion-header">
-                    <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapsePrompt">
-                        <i class="bi bi-chat-left-text me-2"></i> System Prompt
-                    </button>
-                </h2>
-                <div id="collapsePrompt" class="accordion-collapse collapse" data-bs-parent="#aiSettingsAccordion">
-                    <div class="accordion-body">
-                        <div class="mb-3">
+                            <label for="system_prompt" class="form-label">System Prompt</label>
                             <textarea class="form-control" id="system_prompt" name="system_prompt"
-                                      rows="8" placeholder="You are a helpful admin assistant.">{{ settings.get('system_prompt', 'You are a helpful admin assistant.') }}</textarea>
+                                      rows="6" placeholder="You are a helpful admin assistant.">{{ settings.get('system_prompt', 'You are a helpful admin assistant.') }}</textarea>
                             <div class="form-text">Base system prompt. Context items from the Context &amp; Tools page are appended automatically.</div>
                         </div>
-                    </div>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-check-lg me-1"></i> Save General Settings
+                        </button>
+                    </form>
                 </div>
             </div>
         </div>
 
-        <div class="mt-3">
-            <button type="submit" class="btn btn-primary">
-                <i class="bi bi-check-lg me-1"></i> Save Settings
-            </button>
+        <!-- Connections -->
+        <div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapseConnections">
+                    <i class="bi bi-plug me-2"></i> Model Connections
+                </button>
+            </h2>
+            <div id="collapseConnections" class="accordion-collapse collapse show" data-bs-parent="#aiSettingsAccordion">
+                <div class="accordion-body">
+                    <div class="d-flex justify-content-end mb-2">
+                        <a href="/ai/settings/connections/new" class="btn btn-primary btn-sm">
+                            <i class="bi bi-plus-lg"></i> Add Connection
+                        </a>
+                    </div>
+                    {% if connections %}
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr>
+                                    <th style="width: 1%"></th>
+                                    <th>Name</th>
+                                    <th>Model</th>
+                                    <th>Base URL</th>
+                                    <th class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for conn in connections %}
+                                <tr>
+                                    <td>
+                                        {% if conn.is_active %}
+                                        <span class="badge bg-success"><i class="bi bi-check-lg"></i> Active</span>
+                                        {% endif %}
+                                    </td>
+                                    <td><strong>{{ conn.name }}</strong></td>
+                                    <td><code>{{ conn.model }}</code></td>
+                                    <td><code class="text-muted">{{ conn.base_url }}</code></td>
+                                    <td class="text-end">
+                                        {% if not conn.is_active %}
+                                        <form method="post" action="/ai/settings/connections/{{ conn.id }}/activate" class="d-inline">
+                                            <button type="submit" class="btn btn-outline-success btn-sm" title="Set Active">
+                                                <i class="bi bi-lightning"></i> Activate
+                                            </button>
+                                        </form>
+                                        {% endif %}
+                                        <a href="/ai/settings/connections/{{ conn.id }}/edit" class="btn btn-outline-secondary btn-sm">
+                                            <i class="bi bi-pencil"></i> Edit
+                                        </a>
+                                        <form method="post" action="/ai/settings/connections/{{ conn.id }}/delete" class="d-inline"
+                                              onsubmit="return confirm('Delete connection &quot;{{ conn.name }}&quot;?');">
+                                            <button type="submit" class="btn btn-outline-danger btn-sm">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                    {% else %}
+                    <div class="text-muted fst-italic">No connections configured. Click <strong>Add Connection</strong> to create one.</div>
+                    {% endif %}
+                </div>
+            </div>
         </div>
-    </form>
+    </div>
 </div>
 {% endblock %}
