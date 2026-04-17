@@ -204,8 +204,7 @@ function getAjaxTomSelectOptions(el) {
                 .then(function (resp) { return resp.json(); })
                 .then(function (data) { callback(data); })
                 .catch(function () { callback(); });
-        },
-        score: function () { return function () { return 1; }; }
+        }
     };
 }
 
