@@ -1,0 +1,17 @@
+{# Rebuild flt_qs so OOB pagination links carry current filter state #}
+{% set flt_qs = '' %}
+{% if active_filters %}
+{% for idx in range(active_filters|length) %}
+{% set f = active_filters[idx] %}
+{% set flt_qs = flt_qs ~ '&flt' ~ idx ~ '_' ~ f[0] ~ '_' ~ f[1] ~ '=' ~ f[2] %}
+{% endfor %}
+{% endif %}
+{% if header_filter_values %}
+{% for col, val in header_filter_values.items() %}
+{% set flt_qs = flt_qs ~ '&cf_' ~ col ~ '=' ~ val %}
+{% endfor %}
+{% endif %}
+<nav id="pagination" hx-swap-oob="true" class="mt-3">
+    {% include "partials/_pagination.html" %}
+</nav>
+{% include "partials/table_body.html" %}
