@@ -773,10 +773,36 @@ async def bulk_delete(self, request: Request, db: Session = Depends(get_db)):
 | `label` | Button text in the dropdown |
 | `icon` | Bootstrap Icons name (optional) |
 | `hx_post` | POST URL for the bulk action |
-| `confirm` | If set, shows a confirmation dialog before executing |
+| `confirm` | If set, shows a confirmation dialog before executing. Supports `{count}` placeholder, replaced with the number of selected ids at click time. |
 | `class` | CSS class for the dropdown item (e.g., `"text-danger"`) |
 
+#### Cross-page selection (`multi_row_select_all_pages`)
+
+By default, the header "select all" checkbox only selects rows visible on the current page — if you have 660 filtered records and the page shows 20, you get 20 ids. Opt into cross-page selection with one flag:
+
+```python
+class OfferingView(CRUDView):
+    model = Offering
+    multi_row_actions = [
+        {"label": "Delete Selected", "hx_post": "/offerings/bulk-delete",
+         "confirm": "Delete {count} items?"},
+    ]
+    multi_row_select_all_pages = True
+```
+
+Behaviour:
+
+- The header checkbox still selects only the current page (same as before — preserves muscle memory).
+- As soon as anything is selected, an info banner appears above the table:
+  *"N items on this page selected. [Select all matching] [Clear selection]"*
+- Clicking **Select all matching** calls a new framework-registered endpoint `GET /{name}/select-all-ids` that re-runs the active search + filter-badge + header-filter query and returns every matching primary-key id as JSON. The banner flips to *"All X matching items are selected."*
+- Clicking any action button in **With Selected** while in "all matching" mode posts the full id list to your existing `hx_post` handler — **no handler code changes**. Your `confirm` string is rendered with the full count via `{count}`.
+- Any change to search/filter/header-filter (HTMX table-body swap) automatically clears the selection so stale ids can never be posted.
+
+Only the GET `/{name}/select-all-ids` route is auto-registered when the flag is on; it respects the same `allowed_users` / `allowed_groups` checks as the rest of the view.
+
 > **New in 0.5.13:** Added `multi_row_actions` for bulk operations on selected rows.
+> **New in 0.5.31:** Added `multi_row_select_all_pages` flag and `/{name}/select-all-ids` endpoint for cross-page selection that respects the active filter set.
 
 ### HTMX Polling Columns
 
@@ -2447,6 +2473,12 @@ Plus for each `htmx_columns` entry:
 | Method | URL | Description |
 |---|---|---|
 | `GET` | `/{name}/{id}/{field}` | Returns current field value (for polling) |
+
+And when `multi_row_select_all_pages = True`:
+
+| Method | URL | Description |
+|---|---|---|
+| `GET` | `/{name}/select-all-ids` | Returns `{"ids": [...], "total": N}` for every row matching the current search, filter badges, and header filters |
 
 **Example:** A view with `name = "devices"` generates:
 - `GET /devices` -- list all devices
