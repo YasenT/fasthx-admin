@@ -1479,7 +1479,7 @@ class CRUDView:
             }
 
             if request.headers.get("HX-Request") and request.query_params.get("partial"):
-                response = templates.TemplateResponse("partials/list_partial.html", context)
+                response = templates.TemplateResponse("partials/table_body.html", context)
                 # Build a clean URL (without partial=1) so the browser URL
                 # reflects the current search/sort/filter state and survives reload.
                 params = []

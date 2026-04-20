@@ -194,6 +194,36 @@
     {% include "partials/_pagination.html" %}
 </nav>
 
+<script>
+/* Preserve search/filter/sort state when clicking pagination.
+   HTMX keeps window.location in sync via HX-Replace-Url on partial swaps,
+   so we rebuild the pagination href using current URL params + the link's page. */
+(function() {
+    var nav = document.getElementById('pagination');
+    if (!nav) return;
+    nav.addEventListener('click', function(e) {
+        var a = e.target.closest('a.page-link');
+        if (!a) return;
+        var parent = a.closest('.page-item');
+        if (parent && (parent.classList.contains('disabled') || parent.classList.contains('active'))) return;
+        var href = a.getAttribute('href');
+        if (!href) return;
+        var linkUrl = new URL(href, window.location.origin);
+        var page = linkUrl.searchParams.get('page');
+        if (!page) return;
+        var target = new URL(window.location.href);
+        target.searchParams.set('page', page);
+        /* Include any header-filter inputs currently in the DOM */
+        document.querySelectorAll('.cf-input').forEach(function(input) {
+            if (input.value) target.searchParams.set(input.name, input.value);
+            else target.searchParams.delete(input.name);
+        });
+        e.preventDefault();
+        window.location.href = target.toString();
+    });
+})();
+</script>
+
 {% if filter_defs %}
 <script>
 (function() {
