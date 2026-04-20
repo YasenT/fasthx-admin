@@ -797,6 +797,7 @@ Behaviour:
   *"N items on this page selected. [Select all matching] [Clear selection]"*
 - Clicking **Select all matching** calls a new framework-registered endpoint `GET /{name}/select-all-ids` that re-runs the active search + filter-badge + header-filter query and returns every matching primary-key id as JSON. The banner flips to *"All X matching items are selected."*
 - Clicking any action button in **With Selected** while in "all matching" mode posts the full id list to your existing `hx_post` handler — **no handler code changes**. Your `confirm` string is rendered with the full count via `{count}`.
+- Selection survives pagination: clicking any page link keeps the checked set (both for manual checks across pages and for "all matching" mode). This is backed by `sessionStorage` keyed on the view name plus a filter "signature" derived from the URL params (excluding `page`).
 - Any change to search/filter/header-filter (HTMX table-body swap) automatically clears the selection so stale ids can never be posted.
 
 Only the GET `/{name}/select-all-ids` route is auto-registered when the flag is on; it respects the same `allowed_users` / `allowed_groups` checks as the rest of the view.
