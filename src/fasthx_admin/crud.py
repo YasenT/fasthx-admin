@@ -725,6 +725,7 @@ class CRUDView:
     form_ajax_refs = None
     row_actions = None
     multi_row_actions = None
+    multi_row_select_all_pages = False
     page_size = 20
     pk_field = "id"
     can_create = True
@@ -924,6 +925,7 @@ class CRUDView:
         self._setup_batch_poll_route()
         self._setup_progress_route()
         self._setup_ajax_select_routes()
+        self._setup_select_all_ids_route()
         self._setup_decorated_endpoints()
         self.setup_endpoints()
         self._setup_routes()
@@ -1251,6 +1253,67 @@ class CRUDView:
                 methods=["GET"],
                 response_class=HTMLResponse,
             )
+
+    def _setup_select_all_ids_route(self):
+        """Register GET /{name}/select-all-ids — returns JSON list of every
+        primary-key id that matches the current filter/search/header-filter
+        state. Only mounted when multi_row_select_all_pages is enabled."""
+        if not self.multi_row_select_all_pages or not self.multi_row_actions:
+            return
+
+        model = self.model
+        view = self
+
+        def select_all_ids(request: Request, q: str = "", sort: str = "", order: str = "asc", db: Session = Depends(get_db)):
+            denied = view._check_access(request)
+            if denied:
+                return denied
+            active_filters = _parse_filter_params(request, view.column_filters, view.column_labels)
+
+            header_filter_values = {}
+            if view.column_header_filters:
+                allowed_hf = set(view.column_header_filters)
+                for key, val in request.query_params.items():
+                    if key.startswith("cf_") and val:
+                        col_key = key[3:]
+                        if col_key in allowed_hf:
+                            header_filter_values[col_key] = val
+
+            query = _safe_build_query(view, db, q, sort, order, active_filters)
+
+            if header_filter_values:
+                mapper = inspect(model)
+                hf_joined = set()
+                for col_key, val in header_filter_values.items():
+                    if "." in col_key:
+                        fk_col, target_col_name = col_key.split(".", 1)
+                        if fk_col in view.foreign_keys:
+                            fk = view.foreign_keys[fk_col]
+                            target_table = fk.column.table
+                            target_model = _model_registry.get(target_table.name)
+                            if target_model:
+                                if target_table.name not in hf_joined:
+                                    local_col = mapper.columns[fk_col]
+                                    query = query.outerjoin(target_model, local_col == fk.column)
+                                    hf_joined.add(target_table.name)
+                                tcol = getattr(target_model, target_col_name, None)
+                                if tcol is not None:
+                                    query = query.filter(cast(tcol, String).ilike(f"%{val}%"))
+                    else:
+                        col = getattr(model, col_key, None)
+                        if col is not None:
+                            query = query.filter(cast(col, String).ilike(f"%{val}%"))
+
+            pk_col = getattr(model, view.pk_field)
+            ids = [row[0] for row in query.with_entities(pk_col).all()]
+            return JSONResponse({"ids": ids, "total": len(ids)})
+
+        select_all_ids.__name__ = f"{self.name}_select_all_ids"
+        self.router.add_api_route(
+            f"/{self.name}/select-all-ids",
+            select_all_ids,
+            methods=["GET"],
+        )
 
     def _setup_batch_poll_route(self):
         """Auto-register GET /{name}/poll-status for batch htmx column polling."""

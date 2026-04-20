@@ -120,6 +120,16 @@
 </div>
 {% endif %}
 
+{% if view.multi_row_actions and view.multi_row_select_all_pages %}
+<div id="multi-row-banner" class="alert alert-info py-2 px-3 mb-2 d-flex justify-content-between align-items-center" style="display:none !important;">
+    <span id="multi-row-banner-msg"></span>
+    <div>
+        <button type="button" id="multi-row-select-matching" class="btn btn-sm btn-link p-0 me-3" style="display:none;"></button>
+        <button type="button" id="multi-row-clear-selection" class="btn btn-sm btn-link p-0">Clear selection</button>
+    </div>
+</div>
+{% endif %}
+
 <div class="card">
     <div class="table-responsive">
         <table class="table table-hover mb-0">
@@ -418,14 +428,49 @@
         return document.querySelectorAll('.multi-row-check:checked');
     }
 
+    var crossPage = {{ 'true' if view.multi_row_select_all_pages else 'false' }};
+    var viewName  = '{{ view.name }}';
+    var banner    = document.getElementById('multi-row-banner');
+    var bannerMsg = document.getElementById('multi-row-banner-msg');
+    var selectMatchingBtn = document.getElementById('multi-row-select-matching');
+    var clearBtn = document.getElementById('multi-row-clear-selection');
+    var allMatchingMode = false;
+    var totalMatching = 0;
+
     function updateUI() {
         var checked = getChecked();
-        countSpan.textContent = checked.length;
-        actionsGroup.style.display = checked.length > 0 ? '' : 'none';
+        var count = allMatchingMode ? totalMatching : checked.length;
+        countSpan.textContent = count;
+        actionsGroup.style.display = count > 0 ? '' : 'none';
+
+        if (!crossPage || !banner) return;
+        var pageCount = checked.length;
+        if (allMatchingMode) {
+            bannerMsg.textContent = 'All ' + totalMatching + ' matching items are selected.';
+            selectMatchingBtn.style.display = 'none';
+            banner.style.setProperty('display', 'flex', 'important');
+        } else if (pageCount > 0) {
+            bannerMsg.textContent = pageCount + ' item' + (pageCount === 1 ? '' : 's') + ' on this page selected.';
+            selectMatchingBtn.textContent = 'Select all matching';
+            selectMatchingBtn.style.display = '';
+            banner.style.setProperty('display', 'flex', 'important');
+        } else {
+            banner.style.setProperty('display', 'none', 'important');
+        }
     }
 
-    /* Select all / deselect all */
+    function clearSelection() {
+        allMatchingMode = false;
+        totalMatching = 0;
+        var boxes = document.querySelectorAll('.multi-row-check');
+        for (var i = 0; i < boxes.length; i++) boxes[i].checked = false;
+        selectAll.checked = false;
+        updateUI();
+    }
+
+    /* Select all / deselect all on this page */
     selectAll.addEventListener('change', function() {
+        allMatchingMode = false;
         var boxes = document.querySelectorAll('.multi-row-check');
         for (var i = 0; i < boxes.length; i++) boxes[i].checked = selectAll.checked;
         updateUI();
@@ -434,6 +479,7 @@
     /* Individual checkbox changes — use event delegation for HTMX-swapped content */
     document.getElementById('table-body').addEventListener('change', function(e) {
         if (e.target.classList.contains('multi-row-check')) {
+            allMatchingMode = false;
             updateUI();
             /* Uncheck select-all if any box is unchecked */
             if (!e.target.checked) selectAll.checked = false;
@@ -445,6 +491,24 @@
         }
     });
 
+    /* "Select all matching" — flip into cross-page mode */
+    if (crossPage && selectMatchingBtn) {
+        selectMatchingBtn.addEventListener('click', function() {
+            var url = '/' + viewName + '/select-all-ids' + window.location.search;
+            fetch(url, { headers: { 'Accept': 'application/json' } })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    allMatchingMode = true;
+                    totalMatching = data.total || (data.ids ? data.ids.length : 0);
+                    window.__multiRowAllIds = data.ids || [];
+                    updateUI();
+                })
+                .catch(function() { alert('Failed to load matching ids'); });
+        });
+    }
+
+    if (clearBtn) clearBtn.addEventListener('click', clearSelection);
+
     /* Action button clicks */
     var actionBtns = document.querySelectorAll('.multi-row-action');
     for (var i = 0; i < actionBtns.length; i++) {
@@ -452,15 +516,19 @@
             e.preventDefault();
             var url = this.getAttribute('data-url');
             var confirm_msg = this.getAttribute('data-confirm');
-            var checked = getChecked();
-            if (checked.length === 0) return;
-            if (confirm_msg && !confirm(confirm_msg)) return;
-
-            /* Build form data with selected IDs and POST */
-            var formData = new FormData();
-            for (var j = 0; j < checked.length; j++) {
-                formData.append('ids', checked[j].value);
+            var ids;
+            if (allMatchingMode) {
+                ids = window.__multiRowAllIds || [];
+            } else {
+                var checked = getChecked();
+                ids = [];
+                for (var j = 0; j < checked.length; j++) ids.push(checked[j].value);
             }
+            if (ids.length === 0) return;
+            if (confirm_msg && !confirm(confirm_msg.replace('{count}', ids.length))) return;
+
+            var formData = new FormData();
+            for (var k = 0; k < ids.length; k++) formData.append('ids', ids[k]);
             fetch(url, {
                 method: 'POST',
                 body: formData,
@@ -470,11 +538,12 @@
         });
     }
 
-    /* Re-check select-all state after HTMX swaps new table content */
+    /* Re-check select-all state after HTMX swaps new table content.
+       Any filter/search change invalidates the previously-fetched ID list,
+       so we always clear "all matching" mode on a table-body swap. */
     document.body.addEventListener('htmx:afterSwap', function(e) {
         if (e.detail.target && e.detail.target.id === 'table-body') {
-            selectAll.checked = false;
-            updateUI();
+            clearSelection();
         }
     });
 })();
