@@ -20,7 +20,7 @@
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-        <span class="badge bg-secondary">{{ total }} record{{ 's' if total != 1 }}</span>
+        <span id="record-count" class="badge bg-secondary">{{ total }} record{{ 's' if total != 1 }}</span>
     </div>
     <div class="d-flex gap-2">
         <div class="search-box">
@@ -220,6 +220,47 @@
         });
         e.preventDefault();
         window.location.href = target.toString();
+    });
+
+    /* Server fires listMetaUpdate (via HX-Trigger) after each partial swap
+       so we can refresh the record count and rebuild the pagination window
+       to match the new total_pages / current page. */
+    function rebuildPagination(page, totalPages) {
+        if (!totalPages || totalPages <= 1) { nav.innerHTML = ''; return; }
+        var parts = ['<ul class="pagination pagination-sm justify-content-center">'];
+        parts.push('<li class="page-item' + (page <= 1 ? ' disabled' : '') +
+            '"><a class="page-link" href="?page=' + (page - 1) + '"><i class="bi bi-chevron-left"></i></a></li>');
+        var win = 5;
+        var winStart = Math.max(page - win, 1);
+        var winEnd = Math.min(page + win, totalPages);
+        if (winStart > 1) {
+            parts.push('<li class="page-item"><a class="page-link" href="?page=1">1</a></li>');
+            if (winStart > 2) parts.push('<li class="page-item disabled"><span class="page-link">&hellip;</span></li>');
+        }
+        for (var p = winStart; p <= winEnd; p++) {
+            parts.push('<li class="page-item' + (p === page ? ' active' : '') +
+                '"><a class="page-link" href="?page=' + p + '">' + p + '</a></li>');
+        }
+        if (winEnd < totalPages) {
+            if (winEnd < totalPages - 1) parts.push('<li class="page-item disabled"><span class="page-link">&hellip;</span></li>');
+            parts.push('<li class="page-item"><a class="page-link" href="?page=' + totalPages + '">' + totalPages + '</a></li>');
+        }
+        parts.push('<li class="page-item' + (page >= totalPages ? ' disabled' : '') +
+            '"><a class="page-link" href="?page=' + (page + 1) + '"><i class="bi bi-chevron-right"></i></a></li>');
+        parts.push('</ul>');
+        nav.innerHTML = parts.join('');
+    }
+
+    document.body.addEventListener('listMetaUpdate', function(e) {
+        var meta = e.detail;
+        if (!meta) return;
+        if (typeof meta.total === 'number') {
+            var badge = document.getElementById('record-count');
+            if (badge) badge.textContent = meta.total + ' record' + (meta.total === 1 ? '' : 's');
+        }
+        if (typeof meta.page === 'number' && typeof meta.total_pages === 'number') {
+            rebuildPagination(meta.page, meta.total_pages);
+        }
     });
 })();
 </script>

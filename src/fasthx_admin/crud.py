@@ -1498,6 +1498,13 @@ class CRUDView:
                 if params:
                     clean_url += "?" + urlencode(params)
                 response.headers["HX-Replace-Url"] = clean_url
+                response.headers["HX-Trigger"] = json.dumps({
+                    "listMetaUpdate": {
+                        "total_pages": total_pages,
+                        "page": page,
+                        "total": total,
+                    }
+                })
                 return response
 
             return templates.TemplateResponse(view.list_template, context)
