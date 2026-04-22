@@ -64,8 +64,12 @@
                 <i class="bi bi-tools me-2"></i> Registered Tools
             </div>
             <div class="card-body">
+                <div class="alert alert-info small mb-3" role="alert">
+                    <p class="mb-1"><i class="bi bi-info-circle me-1"></i> <strong>What are tools?</strong></p>
+                    <p class="mb-1">Tools are Python functions the AI can call to look up live data from your app &mdash; database queries, external API calls, or computations. For example, a <code>find_customer</code> tool lets the AI answer <em>"What's John Smith's account number?"</em> by running a real query instead of guessing.</p>
+                    <p class="mb-0 text-muted">Enable only the tools you want the AI to have access to. Tools are defined in application code with <code>@tool_registry.tool()</code> and cannot be added from this page.</p>
+                </div>
                 {% if tools %}
-                <p class="text-muted small mb-3">Enable or disable AI-callable tools. Tools are registered by the application developer.</p>
                 <div class="list-group">
                     {% for tool in tools %}
                     <label class="list-group-item d-flex align-items-center gap-3">
@@ -93,8 +97,18 @@
                 <i class="bi bi-diagram-3 me-2"></i> Lifecycle Hooks
             </div>
             <div class="card-body">
+                <div class="alert alert-info small mb-3" role="alert">
+                    <p class="mb-1"><i class="bi bi-info-circle me-1"></i> <strong>What are hooks?</strong></p>
+                    <p class="mb-1">Hooks are Python functions that run at specific points in the chat flow. Four events are supported:</p>
+                    <ul class="mb-1 ps-3">
+                        <li><code>session_start</code> &mdash; when a new chat session begins (good for audit logs)</li>
+                        <li><code>user_prompt_submit</code> &mdash; before the user's message is sent to the AI (inject context, redact PII)</li>
+                        <li><code>pre_tool_use</code> &mdash; before a tool runs (gate by user role, rate-limit; return a message to block the call and feed it back to the AI)</li>
+                        <li><code>post_tool_use</code> &mdash; after a tool runs (transform or redact the result)</li>
+                    </ul>
+                    <p class="mb-0 text-muted">Hooks are defined in application code with <code>@tool_registry.on("event")</code> and cannot be added from this page. A failing hook never blocks the chat &mdash; exceptions are logged and the hook is skipped.</p>
+                </div>
                 {% if hooks %}
-                <p class="text-muted small mb-3">Enable or disable lifecycle hooks. Hooks fire at specific stages of the chat flow (prompt submit, before/after tool use, session start). Registered by the application developer.</p>
                 <div class="list-group">
                     {% for hook in hooks %}
                     <label class="list-group-item d-flex align-items-center gap-3">
