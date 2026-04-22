@@ -182,6 +182,21 @@ Hooks are **registered in Python code** (not in the UI — the hook body is arbi
 
 Hook functions only need to declare the args they actually use — the framework filters by signature.
 
+### Model compatibility
+
+Hooks run entirely server-side — they are model-agnostic. `user_prompt_submit` and `session_start` fire before the LLM is ever contacted, so they work with any model.
+
+`pre_tool_use` and `post_tool_use` only fire when the model actually emits an OpenAI-format `tool_calls` entry in its response. That requires the model (and your serving layer) to support OpenAI-style function calling:
+
+| Model / backend | Notes |
+|---|---|
+| OpenAI, Anthropic-via-LiteLLM, Mistral API | Works out of the box |
+| vLLM + Llama 3.x / Nemotron | Needs `--enable-auto-tool-choice --tool-call-parser llama3_json` (or the equivalent parser for your model family) |
+| Ollama | Works for models tagged as supporting tools (`llama3.1`, `qwen2.5`, recent `gemma` variants, etc.) — check `ollama show <model>` |
+| Base Gemma, raw Llama 2, older models | No native tool-calling — the model describes tools in prose, neither tools nor pre/post hooks will fire |
+
+**Quick check:** call `/ai/chat` with a prompt that should trigger a tool and inspect the `tool_calls` array in the JSON response. If it is populated, `pre_tool_use` and `post_tool_use` will fire for those calls. If it is empty but the AI is talking *about* your tool in the message text, your serving layer is not translating tool calls into the OpenAI shape — fix that first.
+
 ### Registering hooks
 
 ```python
