@@ -84,6 +84,35 @@ def edge_stats(db=None):
     return "\n".join(lines)
 
 
+# --- AI Chat Lifecycle Hooks ---
+
+
+@tool_registry.on("session_start", description="Log when a new chat session begins")
+def log_session_start(session_id, user):
+    import logging
+    logging.getLogger("demo.ai_hooks").info(
+        "chat session started: sid=%s user=%s", session_id, user
+    )
+
+
+@tool_registry.on("user_prompt_submit", description="Append today's date to the user's message")
+def inject_today(message):
+    from datetime import date
+    return f"{message}\n\n(Note: today is {date.today().isoformat()})"
+
+
+@tool_registry.on("pre_tool_use", description="Block any tool whose name starts with 'delete_'")
+def block_deletes(tool_name, user):
+    if tool_name.startswith("delete_"):
+        return f"Blocked: the '{tool_name}' tool is disabled in this demo."
+
+
+@tool_registry.on("post_tool_use", description="Truncate tool results longer than 2000 chars")
+def truncate_long_results(result):
+    if isinstance(result, str) and len(result) > 2000:
+        return result[:2000] + "\n\n[... truncated by post_tool_use hook ...]"
+
+
 # --- Seed data ---
 
 

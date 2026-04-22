@@ -144,11 +144,25 @@ class ToolDef:
         self.parameters = parameters
 
 
+HOOK_EVENTS = ("user_prompt_submit", "pre_tool_use", "post_tool_use", "session_start")
+
+
+class HookDef:
+    """Metadata for a registered lifecycle hook."""
+
+    def __init__(self, func: Callable, name: str, event: str, description: str):
+        self.func = func
+        self.name = name
+        self.event = event
+        self.description = description
+
+
 class ToolRegistry:
-    """Decorator-based tool registration."""
+    """Decorator-based tool and lifecycle-hook registration."""
 
     def __init__(self):
         self._tools: dict[str, ToolDef] = {}
+        self._hooks: dict[str, list[HookDef]] = {}
 
     def tool(self, name: str | None = None, description: str | None = None):
         """Decorator to register a function as an AI tool."""
@@ -234,6 +248,109 @@ class ToolRegistry:
             for t in self._tools.values()
         ]
 
+    # -- Lifecycle hooks --------------------------------------------------
+
+    def on(self, event: str, name: str | None = None, description: str | None = None):
+        """Decorator to register a lifecycle hook.
+
+        Valid events: user_prompt_submit, pre_tool_use, post_tool_use, session_start.
+        Hook return-value semantics are event-specific — see docs/AI.md.
+        """
+        if event not in HOOK_EVENTS:
+            raise ValueError(
+                f"Unknown hook event '{event}'. Valid events: {list(HOOK_EVENTS)}"
+            )
+
+        def decorator(func: Callable) -> Callable:
+            hook_name = name or func.__name__
+            hook_desc = description or (func.__doc__ or "").strip() or hook_name
+            self._hooks.setdefault(event, []).append(
+                HookDef(func, hook_name, event, hook_desc)
+            )
+            return func
+
+        return decorator
+
+    def list_hooks(self) -> list[dict]:
+        """List all registered hooks with metadata, grouped-order by event."""
+        out = []
+        for event in HOOK_EVENTS:
+            for h in self._hooks.get(event, []):
+                out.append({
+                    "name": h.name,
+                    "event": h.event,
+                    "description": h.description,
+                })
+        return out
+
+    async def _call_hook(self, hook: "HookDef", payload: dict) -> Any:
+        sig = python_inspect.signature(hook.func)
+        kwargs = {k: v for k, v in payload.items() if k in sig.parameters}
+        if python_inspect.iscoroutinefunction(hook.func):
+            return await hook.func(**kwargs)
+        return hook.func(**kwargs)
+
+    async def run_hooks_first(
+        self, event: str, enabled: set[str] | None, **payload
+    ) -> Any:
+        """Run hooks for `event`; return the first non-None result (gate semantics).
+
+        Used by `pre_tool_use`: the first hook that returns a string blocks the tool
+        and its return value is fed back to the LLM as the tool result.
+        Exceptions are caught and logged — a raising hook does NOT deny.
+        """
+        for hook in self._hooks.get(event, []):
+            if enabled is not None and hook.name not in enabled:
+                continue
+            try:
+                result = await self._call_hook(hook, payload)
+                if result is not None:
+                    return result
+            except Exception:
+                logger.exception("Hook failed: event=%s name=%s", event, hook.name)
+        return None
+
+    async def run_hooks_pipe(
+        self,
+        event: str,
+        enabled: set[str] | None,
+        pipe_key: str,
+        initial: Any,
+        **payload,
+    ) -> Any:
+        """Run hooks for `event`, piping `initial` through each hook under `pipe_key`.
+
+        Used by `user_prompt_submit` (piping `message`) and `post_tool_use`
+        (piping `result`). Each hook sees the previous hook's output.
+        Returning None leaves the piped value unchanged.
+        """
+        current = initial
+        for hook in self._hooks.get(event, []):
+            if enabled is not None and hook.name not in enabled:
+                continue
+            try:
+                result = await self._call_hook(hook, {**payload, pipe_key: current})
+                if result is not None:
+                    current = result
+            except Exception:
+                logger.exception("Hook failed: event=%s name=%s", event, hook.name)
+        return current
+
+    async def run_hooks_fire(
+        self, event: str, enabled: set[str] | None, **payload
+    ) -> None:
+        """Run hooks for `event`, ignoring return values (fire-and-forget).
+
+        Used by `session_start`.
+        """
+        for hook in self._hooks.get(event, []):
+            if enabled is not None and hook.name not in enabled:
+                continue
+            try:
+                await self._call_hook(hook, payload)
+            except Exception:
+                logger.exception("Hook failed: event=%s name=%s", event, hook.name)
+
 
 # Module-level singleton
 tool_registry = ToolRegistry()
@@ -257,9 +374,22 @@ class AIChatHandler:
         history: list[dict],
         system_prompt: str,
         enabled_tools: set[str] | None = None,
+        enabled_hooks: set[str] | None = None,
+        user: dict | None = None,
         db: Session | None = None,
     ) -> dict:
         """Process a chat message and return the response."""
+        # user_prompt_submit hooks: pipe the message through each hook.
+        message = await self.registry.run_hooks_pipe(
+            "user_prompt_submit",
+            enabled_hooks,
+            "message",
+            message,
+            history=history,
+            user=user,
+            db=db,
+        )
+
         messages = []
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
@@ -287,11 +417,37 @@ class AIChatHandler:
                 except json.JSONDecodeError:
                     args = {}
 
-                tool_result = await self.registry.execute(func["name"], args, db=db)
+                # pre_tool_use gate: first hook returning a string blocks the call
+                # and its value is fed back to the LLM as the tool result.
+                blocked = await self.registry.run_hooks_first(
+                    "pre_tool_use",
+                    enabled_hooks,
+                    tool_name=func["name"],
+                    arguments=args,
+                    user=user,
+                    db=db,
+                )
+                if blocked is not None:
+                    tool_result = str(blocked)
+                else:
+                    tool_result = await self.registry.execute(func["name"], args, db=db)
+                    # post_tool_use: pipe result through hooks for transformation.
+                    tool_result = await self.registry.run_hooks_pipe(
+                        "post_tool_use",
+                        enabled_hooks,
+                        "result",
+                        tool_result,
+                        tool_name=func["name"],
+                        arguments=args,
+                        user=user,
+                        db=db,
+                    )
+
                 tool_calls_made.append({
                     "name": func["name"],
                     "arguments": args,
                     "result": tool_result,
+                    "blocked": blocked is not None,
                 })
 
                 messages.append({
@@ -539,7 +695,8 @@ def create_ai_chat_router(admin) -> APIRouter:
             return JSONResponse({"error": "Empty message"}, status_code=400)
 
         session_id = _get_session_id(request)
-        if not session_id:
+        is_new_session = not session_id
+        if is_new_session:
             session_id = str(uuid.uuid4())
         history = _get_history(session_id)
 
@@ -559,11 +716,33 @@ def create_ai_chat_router(admin) -> APIRouter:
         except (json.JSONDecodeError, TypeError):
             enabled_tools = set()
 
+        # Determine enabled hooks
+        enabled_hooks_json = settings.get("enabled_hooks", "[]")
+        try:
+            enabled_hooks = set(json.loads(enabled_hooks_json))
+        except (json.JSONDecodeError, TypeError):
+            enabled_hooks = set()
+
+        # Resolve current user (may be None if auth disabled/unresolved)
+        user = getattr(request.state, "user", None)
+
+        # Fire session_start hooks on the first message of a new session.
+        if is_new_session:
+            await tool_registry.run_hooks_fire(
+                "session_start",
+                enabled_hooks,
+                session_id=session_id,
+                user=user,
+                db=db,
+            )
+
         handler = AIChatHandler(provider, tool_registry)
         try:
             result = await handler.chat(
                 message, history, system_prompt,
                 enabled_tools=enabled_tools,
+                enabled_hooks=enabled_hooks,
+                user=user,
                 db=db,
             )
         except Exception as e:
@@ -734,11 +913,19 @@ def create_ai_chat_router(admin) -> APIRouter:
         except (json.JSONDecodeError, TypeError):
             pass
 
+        enabled_hooks: list[str] = []
+        try:
+            enabled_hooks = json.loads(settings.get("enabled_hooks", "[]"))
+        except (json.JSONDecodeError, TypeError):
+            pass
+
         return templates.TemplateResponse("ai_context_settings.html", {
             "request": request,
             "context_items": context_items,
             "tools": tool_registry.list_tools(),
             "enabled_tools": enabled_tools,
+            "hooks": tool_registry.list_hooks(),
+            "enabled_hooks": enabled_hooks,
             "active_page": "ai_context_settings",
         })
 
@@ -769,9 +956,16 @@ def create_ai_chat_router(admin) -> APIRouter:
             if form.get(f"tool_{tool_info['name']}") == "on":
                 enabled_tools.append(tool_info["name"])
 
+        # Parse enabled hooks
+        enabled_hooks = []
+        for hook_info in tool_registry.list_hooks():
+            if form.get(f"hook_{hook_info['name']}") == "on":
+                enabled_hooks.append(hook_info["name"])
+
         _save_settings(db, {
             "context_items": json.dumps(context_items),
             "enabled_tools": json.dumps(enabled_tools),
+            "enabled_hooks": json.dumps(enabled_hooks),
         })
         _invalidate_settings_cache()
 
@@ -781,6 +975,8 @@ def create_ai_chat_router(admin) -> APIRouter:
             "context_items": context_items,
             "tools": tool_registry.list_tools(),
             "enabled_tools": enabled_tools,
+            "hooks": tool_registry.list_hooks(),
+            "enabled_hooks": enabled_hooks,
             "active_page": "ai_context_settings",
             "save_success": True,
         })
