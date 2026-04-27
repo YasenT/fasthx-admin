@@ -188,6 +188,7 @@ function getAjaxTomSelectOptions(el) {
     var ajaxUrl = el.getAttribute('data-ajax-url');
     var placeholder = el.getAttribute('data-placeholder') || 'Type to search...';
     return {
+        plugins: ['virtual_scroll'],
         create: false,
         placeholder: placeholder,
         allowEmptyOption: false,
@@ -195,14 +196,24 @@ function getAjaxTomSelectOptions(el) {
         labelField: 'label',
         searchField: 'label',
         firstUrl: function (query) {
-            return ajaxUrl + '?q=' + encodeURIComponent(query);
+            return ajaxUrl + '?q=' + encodeURIComponent(query) + '&page=1';
         },
         shouldLoad: function () { return true; },
-        load: function (query, callback) {
-            var url = ajaxUrl + '?q=' + encodeURIComponent(query);
+        load: function (url, callback) {
+            var self = this;
             fetch(url)
                 .then(function (resp) { return resp.json(); })
-                .then(function (data) { callback(data); })
+                .then(function (data) {
+                    // Backwards-compat: handler may return a bare array (no pagination).
+                    if (Array.isArray(data)) {
+                        callback(data);
+                        return;
+                    }
+                    if (data && data.next) {
+                        self.setNextUrl(self.lastValue, data.next);
+                    }
+                    callback((data && data.items) || []);
+                })
                 .catch(function () { callback(); });
         }
     };

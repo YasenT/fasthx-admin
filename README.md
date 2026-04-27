@@ -608,11 +608,13 @@ class OfferingView(CRUDView):
 
 **How it works:**
 
-1. The form renders a text search input above a multi-row `<select>` (instead of a single dropdown with all options)
-2. As the user types, HTMX fires a `GET /{view}/ajax/{field}?q=<term>` request after a 300ms debounce
-3. The endpoint filters the target model using `ilike` on the configured `fields` and returns paginated `<option>` HTML fragments
-4. If more results exist beyond `page_size`, an "infinite scroll" trigger auto-loads the next page when the user scrolls to the bottom of the select list (using `hx-trigger="intersect once"`)
-5. On edit forms, the currently selected value is pre-populated in the select
+1. The form renders a single Tom Select dropdown (no separate search box). Tom Select uses its `virtual_scroll` plugin to fetch options on demand.
+2. When the dropdown opens, Tom Select calls `GET /{view}/ajax/{field}?q=&page=1` to load the first page of options.
+3. As the user types, Tom Select re-fires the same endpoint with `?q=<term>&page=1`. The backend filters the target model with `ilike` over the configured `fields`.
+4. As the user scrolls toward the bottom of the open dropdown, Tom Select automatically requests the next page using the `next` URL the backend returned. This continues until the backend returns `more: false`.
+5. On edit forms, the currently selected value is pre-populated in the select.
+
+So `page_size` is **not** a hard cap on visible options — it's the chunk size per request. A user can scroll through all rows in the table, paginating transparently.
 
 **Configuration options:**
 
@@ -621,13 +623,25 @@ class OfferingView(CRUDView):
 | `model` | SQLAlchemy model | *(required)* | The related model to search |
 | `fields` | `list[str]` | `[]` | Model columns to search with `ilike` |
 | `placeholder` | `str` | `"Type to search..."` | Placeholder text for the search input |
-| `page_size` | `int` | `10` | Number of results per HTMX request |
+| `page_size` | `int` | `10` | Rows fetched per request (infinite scroll loads more on demand) |
 
 **Auto-registered endpoint:**
 
 Each `form_ajax_refs` entry registers a `GET /{view_name}/ajax/{field_key}` route that accepts:
 - `q` -- search term (optional)
 - `page` -- page number (default: 1)
+
+The response is JSON:
+
+```json
+{
+  "items": [{"value": "1", "label": "Customer 01"}, ...],
+  "more": true,
+  "next": "/orders/ajax/customer_id?q=acme&page=2"
+}
+```
+
+`more` is `true` when more rows exist past this page, and `next` is the URL Tom Select will request when the user scrolls. When the result set is exhausted, `more` is `false` and `next` is `null`.
 
 ### Row Actions
 

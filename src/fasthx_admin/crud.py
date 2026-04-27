@@ -952,6 +952,8 @@ class CRUDView:
                     denied = view._check_access(request)
                     if denied:
                         return denied
+                    if page < 1:
+                        page = 1
                     query = db.query(tgt_model)
                     if q and s_fields:
                         filters = [
@@ -962,15 +964,23 @@ class CRUDView:
                         if filters:
                             query = query.filter(or_(*filters))
 
-                    items = query.offset((page - 1) * p_size).limit(p_size).all()
+                    rows = query.offset((page - 1) * p_size).limit(p_size + 1).all()
+                    has_more = len(rows) > p_size
+                    rows = rows[:p_size]
 
-                    results = []
-                    for item in items:
-                        results.append({
-                            "value": str(getattr(item, "id", "")),
-                            "label": str(item),
-                        })
-                    return results
+                    results = [
+                        {"value": str(getattr(item, "id", "")), "label": str(item)}
+                        for item in rows
+                    ]
+
+                    next_url = None
+                    if has_more:
+                        next_url = (
+                            f"{request.url.path}?"
+                            + urlencode({"q": q, "page": page + 1})
+                        )
+
+                    return {"items": results, "more": has_more, "next": next_url}
 
                 search_handler.__name__ = f"{view.name}_{fk}_ajax_search"
                 return search_handler
