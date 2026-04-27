@@ -1915,12 +1915,14 @@ See **[docs/AI.md](docs/AI.md)** for the full guide: installation, tool registra
 
 For quick, stateless AI calls — e.g. generating a summary, drafting an email body, classifying a row — use `ai_complete()`. It uses the **same active connection** configured in *AI Settings* but skips the chat machinery (no history, no hooks). Tool calling is opt-in per call.
 
-Available as both a module-level function and a `CRUDView` method:
+Available as both a `CRUDView` method (`self.ai_complete(...)`) and a module-level function (`from fasthx_admin import ai_complete`). They are the same code — pick whichever reads better at the call site.
+
+Inside a CRUDView endpoint, the method form is most convenient:
 
 ```python
 from fastapi import Depends
 from sqlalchemy.orm import Session
-from fasthx_admin import CRUDView, get_db, ai_complete
+from fasthx_admin import CRUDView, get_db
 
 class CustomerView(CRUDView):
     model = Customer
@@ -1934,6 +1936,44 @@ class CustomerView(CRUDView):
             db=db,
         )
         return {"summary": text}
+```
+
+Outside a CRUDView (e.g. a plain FastAPI route, a dashboard handler, a background job, a CLI command) import the function directly. Here it powers a standalone "draft release notes" endpoint that isn't tied to any model:
+
+```python
+from fastapi import Depends, FastAPI
+from sqlalchemy.orm import Session
+from fasthx_admin import ai_complete, get_db
+
+app = FastAPI()
+
+@app.post("/tools/release-notes")
+async def draft_release_notes(
+    since_tag: str,
+    commits: list[str],
+    db: Session = Depends(get_db),
+):
+    bullets = "\n".join(f"- {c}" for c in commits)
+    notes = await ai_complete(
+        f"Write release notes for the changes since {since_tag}:\n\n{bullets}",
+        system="You write crisp, user-facing changelogs in markdown.",
+        db=db,
+    )
+    return {"notes": notes}
+```
+
+`db=` is optional here too — pass it if you already have a session (the helper will reuse it instead of opening a short-lived one). For one-off scripts or workers without a request, just omit it:
+
+```python
+import asyncio
+from fasthx_admin import init_db, ai_complete
+
+async def main():
+    init_db("postgresql://...")  # same DB the admin uses, so settings are shared
+    summary = await ai_complete("Summarize today's incident report: ...")
+    print(summary)
+
+asyncio.run(main())
 ```
 
 **Signature:**
