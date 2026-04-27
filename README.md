@@ -41,6 +41,7 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
 - [Authentication](#authentication)
 - [AI Chat (Optional)](#ai-chat-optional) — full guide in [docs/AI.md](docs/AI.md)
   - [One-shot AI calls (`ai_complete`)](#one-shot-ai-calls-ai_complete)
+    - [Allowing tool calls](#allowing-tool-calls)
 - [Custom Pages (Dashboard, Wizard, etc.)](#custom-pages-dashboard-wizard-etc)
 - [Custom Navigation Links](#custom-navigation-links)
 - [Templates](#templates)
@@ -1912,7 +1913,7 @@ See **[docs/AI.md](docs/AI.md)** for the full guide: installation, tool registra
 
 ### One-shot AI calls (`ai_complete`)
 
-For quick, stateless AI calls — e.g. generating a summary, drafting an email body, classifying a row — use `ai_complete()`. It uses the **same active connection** configured in *AI Settings* but skips the chat machinery (no history, no tools, no hooks).
+For quick, stateless AI calls — e.g. generating a summary, drafting an email body, classifying a row — use `ai_complete()`. It uses the **same active connection** configured in *AI Settings* but skips the chat machinery (no history, no hooks). Tool calling is opt-in per call.
 
 Available as both a module-level function and a `CRUDView` method:
 
@@ -1942,6 +1943,7 @@ async def ai_complete(
     prompt: str,
     *,
     system: str | None = None,
+    tools: list[str] | None = None,
     db: Session | None = None,
 ) -> str
 ```
@@ -1950,9 +1952,49 @@ async def ai_complete(
 |---|---|
 | `prompt` | The user message sent to the model. |
 | `system` | Optional system prompt prepended to the conversation. |
-| `db` | Existing SQLAlchemy session. If omitted, a short-lived one is opened just to load the active connection. |
+| `tools` | Optional list of tool **names** registered via `@tool_registry.tool()` to expose for this call. Default `None` means no tools. Unknown names are silently ignored. |
+| `db` | Existing SQLAlchemy session. If omitted, a short-lived one is opened. The session is also passed to any tools that take a `db` parameter. |
 
 Returns the model's response text. Raises `RuntimeError` if no AI connection is configured in *AI Settings*. Enabling the chat widget (`ai_chat=True`) is **not** required — only the connection needs to exist.
+
+#### Allowing tool calls
+
+Pass a list of tool names already registered with `@tool_registry.tool()`:
+
+```python
+from fasthx_admin import tool_registry
+
+@tool_registry.tool(description="Look up a customer's open invoice count by ID.")
+def open_invoice_count(customer_id: int, db: Session) -> str:
+    n = db.query(Invoice).filter(
+        Invoice.customer_id == customer_id, Invoice.status == "open"
+    ).count()
+    return f"{n} open invoices"
+
+class CustomerView(CRUDView):
+    model = Customer
+
+    @CRUDView.endpoint("/{item_id}/draft-reminder", methods=["POST"])
+    async def draft_reminder(self, item_id: int, db: Session = Depends(get_db)):
+        customer = db.query(Customer).get(item_id)
+        body = await self.ai_complete(
+            f"Draft a polite reminder email for customer #{customer.id} ({customer.name}).",
+            system="You write professional, concise customer emails.",
+            tools=["open_invoice_count"],
+            db=db,
+        )
+        return {"body": body}
+```
+
+**How tool calling works here:**
+
+1. The model receives the prompt plus the OpenAI-format definitions for the named tools.
+2. If the model emits one or more tool calls, each is executed via `tool_registry.execute()` (errors are caught and returned to the model as `"Error executing tool 'X': ..."` rather than raised).
+3. Tool results are appended to the message list, the provider is called once more, and that final response is returned.
+
+Tool execution is **single-round**: a tool result that triggers a *second* round of tool calls will not fire. For multi-step agentic loops use the chat widget instead. Cost-wise, expect two model calls when tools fire (one to decide which tool, one to compose the answer) versus one when they don't.
+
+The `tools=` list shares the same global `tool_registry` as the chat widget, so a tool you register once is reusable in both places. The chat widget's *enabled tools* setting in *AI Context & Tools* does **not** apply to `ai_complete` — each call names its own tools explicitly.
 
 ---
 

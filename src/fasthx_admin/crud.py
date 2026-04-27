@@ -2094,16 +2094,18 @@ class CRUDView:
         prompt: str,
         *,
         system: str | None = None,
+        tools: list[str] | None = None,
         db: Session | None = None,
     ) -> str:
         """One-shot prompt against the configured AI connection. Returns response text.
 
         Convenience wrapper for use inside ``@CRUDView.endpoint()`` handlers.
-        Pass ``db`` if you already have a session; otherwise a short-lived one
-        is opened just to load the active connection.
+        Pass ``tools=[...]`` to allow the model to call tools registered via
+        ``@tool_registry.tool()``. Pass ``db`` if you already have a session;
+        otherwise a short-lived one is opened just to load the active connection.
         """
         from .ai_chat import ai_complete as _ai_complete
-        return await _ai_complete(prompt, system=system, db=db)
+        return await _ai_complete(prompt, system=system, tools=tools, db=db)
 
     def register(self, app):
         """Register this view's routes with the FastAPI app."""

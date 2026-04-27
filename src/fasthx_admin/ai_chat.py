@@ -682,12 +682,17 @@ async def ai_complete(
     prompt: str,
     *,
     system: str | None = None,
+    tools: list[str] | None = None,
     db: Session | None = None,
 ) -> str:
     """One-shot prompt against the active AI connection. Returns response text.
 
-    Stateless — no chat history, no tools, no hooks. Suitable for quick AI calls
-    inside a CRUDView endpoint or anywhere the active connection should be used.
+    Stateless — no chat history, no hooks. Optionally allows the model to call
+    tools registered via ``@tool_registry.tool()`` by passing their names in
+    ``tools``. Tool execution is single-round: if the model emits tool calls,
+    they run, results are fed back, and the model produces a final answer. A
+    tool result that triggers another tool call will *not* fire — for
+    agent-style loops use the chat handler.
 
     Raises RuntimeError if no connection is configured.
     """
@@ -701,17 +706,46 @@ async def ai_complete(
                 "No AI connection configured. Add one in AI Settings."
             )
         provider = _build_provider(conn)
+
+        messages: list[dict] = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+
+        enabled = set(tools) if tools else None
+        tool_specs = tool_registry.get_openai_tools(enabled) if enabled else None
+
+        result = await provider.chat(messages, tools=tool_specs or None)
+
+        if result.get("tool_calls"):
+            messages.append({
+                "role": "assistant",
+                "content": result.get("response") or None,
+                "tool_calls": result["tool_calls"],
+            })
+            for tc in result["tool_calls"]:
+                func = tc["function"]
+                try:
+                    args = (
+                        json.loads(func["arguments"])
+                        if isinstance(func["arguments"], str)
+                        else func["arguments"]
+                    )
+                except json.JSONDecodeError:
+                    args = {}
+                tool_result = await tool_registry.execute(func["name"], args, db=db)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": tool_result,
+                })
+            final = await provider.chat(messages)
+            return final["response"]
+
+        return result["response"]
     finally:
         if own_session:
             db.close()
-
-    messages: list[dict] = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
-
-    result = await provider.chat(messages)
-    return result["response"]
 
 
 def create_ai_chat_router(admin) -> APIRouter:
