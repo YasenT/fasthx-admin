@@ -678,6 +678,42 @@ def _build_provider(conn: AIChatConnection) -> AIProvider:
     )
 
 
+async def ai_complete(
+    prompt: str,
+    *,
+    system: str | None = None,
+    db: Session | None = None,
+) -> str:
+    """One-shot prompt against the active AI connection. Returns response text.
+
+    Stateless — no chat history, no tools, no hooks. Suitable for quick AI calls
+    inside a CRUDView endpoint or anywhere the active connection should be used.
+
+    Raises RuntimeError if no connection is configured.
+    """
+    own_session = db is None
+    if own_session:
+        db = next(get_db())
+    try:
+        conn = _get_active_connection(db)
+        if conn is None:
+            raise RuntimeError(
+                "No AI connection configured. Add one in AI Settings."
+            )
+        provider = _build_provider(conn)
+    finally:
+        if own_session:
+            db.close()
+
+    messages: list[dict] = []
+    if system:
+        messages.append({"role": "system", "content": system})
+    messages.append({"role": "user", "content": prompt})
+
+    result = await provider.chat(messages)
+    return result["response"]
+
+
 def create_ai_chat_router(admin) -> APIRouter:
     """Create FastAPI router with AI chat endpoints."""
     router = APIRouter(prefix="/ai", tags=["AI Chat"])

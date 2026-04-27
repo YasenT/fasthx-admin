@@ -2089,6 +2089,22 @@ class CRUDView:
         """
         pass
 
+    async def ai_complete(
+        self,
+        prompt: str,
+        *,
+        system: str | None = None,
+        db: Session | None = None,
+    ) -> str:
+        """One-shot prompt against the configured AI connection. Returns response text.
+
+        Convenience wrapper for use inside ``@CRUDView.endpoint()`` handlers.
+        Pass ``db`` if you already have a session; otherwise a short-lived one
+        is opened just to load the active connection.
+        """
+        from .ai_chat import ai_complete as _ai_complete
+        return await _ai_complete(prompt, system=system, db=db)
+
     def register(self, app):
         """Register this view's routes with the FastAPI app."""
         app.include_router(self.router, tags=[self.display_name])

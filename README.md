@@ -74,6 +74,7 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
 - [Progress Bar](#progress-bar)
 - [Authentication](#authentication)
 - [AI Chat (Optional)](#ai-chat-optional) — full guide in [docs/AI.md](docs/AI.md)
+  - [One-shot AI calls (`ai_complete`)](#one-shot-ai-calls-ai_complete)
 - [Custom Pages (Dashboard, Wizard, etc.)](#custom-pages-dashboard-wizard-etc)
 - [Custom Navigation Links](#custom-navigation-links)
 - [Templates](#templates)
@@ -1941,6 +1942,50 @@ admin = Admin(app, title="My Admin", ai_chat=True)
 ```
 
 See **[docs/AI.md](docs/AI.md)** for the full guide: installation, tool registration, settings UI, custom providers, API reference, and planned lifecycle hooks.
+
+### One-shot AI calls (`ai_complete`)
+
+For quick, stateless AI calls — e.g. generating a summary, drafting an email body, classifying a row — use `ai_complete()`. It uses the **same active connection** configured in *AI Settings* but skips the chat machinery (no history, no tools, no hooks).
+
+Available as both a module-level function and a `CRUDView` method:
+
+```python
+from fastapi import Depends
+from sqlalchemy.orm import Session
+from fasthx_admin import CRUDView, get_db, ai_complete
+
+class CustomerView(CRUDView):
+    model = Customer
+
+    @CRUDView.endpoint("/{item_id}/summarize", methods=["POST"])
+    async def summarize(self, item_id: int, db: Session = Depends(get_db)):
+        customer = db.query(Customer).get(item_id)
+        text = await self.ai_complete(
+            f"Summarize this customer in one sentence:\n\n{customer.notes}",
+            system="You are a concise CRM assistant.",
+            db=db,
+        )
+        return {"summary": text}
+```
+
+**Signature:**
+
+```python
+async def ai_complete(
+    prompt: str,
+    *,
+    system: str | None = None,
+    db: Session | None = None,
+) -> str
+```
+
+| Parameter | Description |
+|---|---|
+| `prompt` | The user message sent to the model. |
+| `system` | Optional system prompt prepended to the conversation. |
+| `db` | Existing SQLAlchemy session. If omitted, a short-lived one is opened just to load the active connection. |
+
+Returns the model's response text. Raises `RuntimeError` if no AI connection is configured in *AI Settings*. Enabling the chat widget (`ai_chat=True`) is **not** required — only the connection needs to exist.
 
 ---
 
