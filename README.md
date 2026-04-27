@@ -5,35 +5,43 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
 ## Screenshots
 
 ### Dashboard
-![Dashboard](https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-dashboard.jpg)
+<img src="https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-dashboard.jpg" alt="Dashboard" width="900" height="506">
+
 *Dashboard with clickable summary cards, recent items, and quick actions*
 
 ### List View
-![List View](https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-list.jpg)
+<img src="https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-list.jpg" alt="List View" width="900" height="728">
+
 *List view with search, sorting, pagination, and row actions*
 
 ### Form with Sections
-![Form View](https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-form.jpg)
+<img src="https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-form.jpg" alt="Form View" width="900" height="506">
+
 *Create/edit form with accordion sections and AJAX select fields*
 
 ### Detail View
-![Detail View](https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-detail.jpg)
+<img src="https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-detail.jpg" alt="Detail View" width="900" height="506">
+
 *Detail view with formatted fields*
 
 ### Toast Notifications
-![Toast Notification](https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-toast.jpg)
+<img src="https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-toast.jpg" alt="Toast Notification" width="900" height="506">
+
 *Toast notifications for validation errors and action feedback*
 
 ### AI Settings
-![AI Settings](https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-ai-settings.jpg)
+<img src="https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-ai-settings.jpg" alt="AI Settings" width="900" height="506">
+
 *Configure AI provider, model, API key, and connection settings*
 
 ### AI Context & Tools
-![AI Context & Tools](https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-ai-context.jpg)
+<img src="https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-ai-context.jpg" alt="AI Context &amp; Tools" width="900" height="506">
+
 *Manage context items and enable/disable AI-callable tools*
 
 ### AI Chat Widget
-![AI Chat](https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-ai-chat.jpg)
+<img src="https://raw.githubusercontent.com/talbiston/fasthx-admin/main/docs/screenshot-ai-chat.jpg" alt="AI Chat" width="900" height="506">
+
 *Built-in AI assistant with tool calling and markdown support*
 
 ## Table of Contents
