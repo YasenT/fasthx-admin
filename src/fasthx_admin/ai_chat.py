@@ -10,6 +10,7 @@ Provides a pluggable AI chat widget with:
 
 from __future__ import annotations
 
+import asyncio
 import inspect as python_inspect
 import json
 import logging
@@ -21,7 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, get_type_hints
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from sqlalchemy import Boolean, Column, Float, Integer, String, Text, inspect
+from sqlalchemy import Boolean, Column, Float, Integer, String, Text, inspect, text
 from sqlalchemy.orm import Session
 
 from .database import Base, get_db, get_engine
@@ -29,6 +30,84 @@ from .database import Base, get_db, get_engine
 logger = logging.getLogger("fasthx_admin.ai_chat")
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
+
+
+# ---------------------------------------------------------------------------
+# Keycloak (OAuth2 client_credentials) token manager
+# ---------------------------------------------------------------------------
+
+
+class KeycloakTokenManager:
+    """Fetches and caches OAuth2 client_credentials tokens from a Keycloak realm.
+
+    Instances are deduplicated by (auth_url, client_id, client_secret) so multiple
+    providers configured against the same client share a token + cache.
+    """
+
+    _instances: dict[tuple, "KeycloakTokenManager"] = {}
+
+    def __new__(
+        cls,
+        auth_url: str,
+        client_id: str,
+        client_secret: str,
+        ssl_verify: bool = False,
+    ):
+        key = (auth_url, client_id, client_secret)
+        if key not in cls._instances:
+            instance = super().__new__(cls)
+            instance._initialized = False
+            cls._instances[key] = instance
+        return cls._instances[key]
+
+    def __init__(
+        self,
+        auth_url: str,
+        client_id: str,
+        client_secret: str,
+        ssl_verify: bool = False,
+    ):
+        if self._initialized:
+            # ssl_verify may have been toggled in the connection — keep it fresh.
+            self.ssl_verify = ssl_verify
+            return
+        self.auth_url = auth_url
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.ssl_verify = ssl_verify
+        self.token: str | None = None
+        self.expires_at: float = 0.0
+        self._initialized = True
+
+    def get_token(self) -> str | None:
+        # Refresh if missing or expiring within 60 seconds.
+        if not self.token or time.time() > (self.expires_at - 60):
+            self._refresh_token()
+        return self.token
+
+    def _refresh_token(self) -> None:
+        import requests
+        try:
+            import urllib3
+            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+        except Exception:
+            pass
+
+        logger.info("Fetching new OAuth token from Keycloak (%s)", self.auth_url)
+        payload = {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "grant_type": "client_credentials",
+        }
+        response = requests.post(
+            self.auth_url, data=payload, verify=self.ssl_verify, timeout=10
+        )
+        response.raise_for_status()
+        token_data = response.json()
+        self.token = token_data.get("access_token")
+        expires_in = token_data.get("expires_in", 300)
+        self.expires_at = time.time() + expires_in
+
 
 # ---------------------------------------------------------------------------
 # Provider Abstraction
@@ -70,6 +149,7 @@ class OpenAICompatibleProvider(AIProvider):
         max_tokens: int = 2048,
         timeout: float = 60.0,
         ssl_verify: bool = True,
+        token_manager: KeycloakTokenManager | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -78,6 +158,7 @@ class OpenAICompatibleProvider(AIProvider):
         self.max_tokens = max_tokens
         self.timeout = timeout
         self.ssl_verify = ssl_verify
+        self.token_manager = token_manager
 
     async def chat(
         self, messages: list[dict], tools: list[dict] | None = None, **kwargs
@@ -91,7 +172,12 @@ class OpenAICompatibleProvider(AIProvider):
 
         url = f"{self.base_url}/v1/chat/completions"
         headers = {"Content-Type": "application/json"}
-        if self.api_key:
+        if self.token_manager is not None:
+            # Off-thread to avoid blocking the event loop on the (rare) refresh.
+            token = await asyncio.to_thread(self.token_manager.get_token)
+            if token:
+                headers["Authorization"] = f"Bearer {token}"
+        elif self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
         payload: dict[str, Any] = {
@@ -479,6 +565,10 @@ class AIChatSettings(Base):
     value = Column(Text)
 
 
+AUTH_TYPE_API_KEY = "api_key"
+AUTH_TYPE_KEYCLOAK = "keycloak"
+
+
 class AIChatConnection(Base):
     __tablename__ = "fasthx_admin_ai_connections"
 
@@ -492,6 +582,41 @@ class AIChatConnection(Base):
     timeout = Column(Float, nullable=False, default=60.0)
     ssl_verify = Column(Boolean, nullable=False, default=True)
     is_active = Column(Boolean, nullable=False, default=False)
+    auth_type = Column(String(32), nullable=False, default=AUTH_TYPE_API_KEY)
+    keycloak_url = Column(String(500), default="")
+    keycloak_client_id = Column(String(255), default="")
+    keycloak_client_secret = Column(Text, default="")
+
+
+# Columns added to AIChatConnection after the initial release. Existing
+# installations need an in-place ALTER to pick them up.
+_CONNECTION_ADDITIVE_COLUMNS: list[tuple[str, str]] = [
+    ("auth_type", "VARCHAR(32) NOT NULL DEFAULT 'api_key'"),
+    ("keycloak_url", "VARCHAR(500) DEFAULT ''"),
+    ("keycloak_client_id", "VARCHAR(255) DEFAULT ''"),
+    ("keycloak_client_secret", "TEXT DEFAULT ''"),
+]
+
+
+def _ensure_connection_columns(engine) -> None:
+    """Add columns to fasthx_admin_ai_connections that exist on the model but
+    not in the live schema. SQLAlchemy's create_all only creates missing
+    tables, not missing columns, so upgrades need this nudge.
+    """
+    inspector = inspect(engine)
+    if not inspector.has_table(AIChatConnection.__tablename__):
+        return
+    existing = {col["name"] for col in inspector.get_columns(AIChatConnection.__tablename__)}
+    for name, ddl in _CONNECTION_ADDITIVE_COLUMNS:
+        if name in existing:
+            continue
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    f"ALTER TABLE {AIChatConnection.__tablename__} "
+                    f"ADD COLUMN {name} {ddl}"
+                )
+            )
 
 
 def ensure_ai_tables():
@@ -499,6 +624,7 @@ def ensure_ai_tables():
     engine = get_engine()
     AIChatSettings.__table__.create(bind=engine, checkfirst=True)
     AIChatConnection.__table__.create(bind=engine, checkfirst=True)
+    _ensure_connection_columns(engine)
 
 
 def _get_settings(db: Session) -> dict[str, str]:
@@ -629,6 +755,7 @@ def _migrate_legacy_connection(db: Session) -> AIChatConnection | None:
         timeout=float(settings.get("timeout", "60") or 60),
         ssl_verify=settings.get("ssl_verify", "true") == "true",
         is_active=True,
+        auth_type=AUTH_TYPE_API_KEY,
     )
     db.add(conn)
 
@@ -667,6 +794,20 @@ def _set_active_connection(db: Session, conn_id: int) -> None:
 
 def _build_provider(conn: AIChatConnection) -> AIProvider:
     """Build an AI provider from a connection row."""
+    token_manager: KeycloakTokenManager | None = None
+    if (conn.auth_type or AUTH_TYPE_API_KEY) == AUTH_TYPE_KEYCLOAK:
+        if not conn.keycloak_url or not conn.keycloak_client_id:
+            raise RuntimeError(
+                f"Connection '{conn.name}' uses Keycloak auth but is missing "
+                "keycloak_url or keycloak_client_id."
+            )
+        token_manager = KeycloakTokenManager(
+            auth_url=conn.keycloak_url,
+            client_id=conn.keycloak_client_id,
+            client_secret=conn.keycloak_client_secret or "",
+            ssl_verify=bool(conn.ssl_verify),
+        )
+
     return OpenAICompatibleProvider(
         base_url=conn.base_url or "https://api.openai.com",
         api_key=conn.api_key or "",
@@ -675,6 +816,7 @@ def _build_provider(conn: AIChatConnection) -> AIProvider:
         max_tokens=int(conn.max_tokens if conn.max_tokens is not None else 2048),
         timeout=float(conn.timeout if conn.timeout is not None else 60.0),
         ssl_verify=bool(conn.ssl_verify),
+        token_manager=token_manager,
     )
 
 
@@ -899,6 +1041,26 @@ def create_ai_chat_router(admin) -> APIRouter:
         except ValueError:
             return None, "Temperature, max tokens, and timeout must be numeric."
         conn.ssl_verify = form.get("ssl_verify") == "on"
+
+        auth_type = (form.get("auth_type") or AUTH_TYPE_API_KEY).strip()
+        if auth_type not in (AUTH_TYPE_API_KEY, AUTH_TYPE_KEYCLOAK):
+            return None, f"Unknown auth type: {auth_type}"
+        conn.auth_type = auth_type
+
+        conn.keycloak_url = (form.get("keycloak_url") or "").strip()
+        conn.keycloak_client_id = (form.get("keycloak_client_id") or "").strip()
+        kc_secret = form.get("keycloak_client_secret", "")
+        if kc_secret != "********":
+            conn.keycloak_client_secret = kc_secret
+
+        if auth_type == AUTH_TYPE_KEYCLOAK:
+            if not conn.keycloak_url:
+                return None, "Keycloak token URL is required for Keycloak auth."
+            if not conn.keycloak_client_id:
+                return None, "Keycloak client ID is required for Keycloak auth."
+            if not conn.keycloak_client_secret:
+                return None, "Keycloak client secret is required for Keycloak auth."
+
         return conn, None
 
     @router.get("/settings/connections/new", response_class=HTMLResponse)

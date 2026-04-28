@@ -34,18 +34,60 @@
                     <div class="form-text">OpenAI-compatible endpoint (OpenAI, vLLM, Ollama, LiteLLM, etc.)</div>
                 </div>
 
+                {% set auth_type = (connection.auth_type if connection and connection.auth_type else 'api_key') %}
                 <div class="mb-3">
-                    <label for="api_key" class="form-label">API Key</label>
-                    <div class="input-group">
-                        <input type="password" class="form-control" id="api_key" name="api_key"
-                               value="{% if connection and connection.api_key %}********{% endif %}"
-                               placeholder="sk-...">
-                        <button class="btn btn-outline-secondary" type="button"
-                                onclick="this.previousElementSibling.type = this.previousElementSibling.type === 'password' ? 'text' : 'password'">
-                            <i class="bi bi-eye"></i>
-                        </button>
+                    <label for="auth_type" class="form-label">Authentication</label>
+                    <select class="form-select" id="auth_type" name="auth_type"
+                            onchange="document.getElementById('api_key_block').hidden = this.value !== 'api_key'; document.getElementById('keycloak_block').hidden = this.value !== 'keycloak';">
+                        <option value="api_key" {% if auth_type == 'api_key' %}selected{% endif %}>API Key (static Bearer token)</option>
+                        <option value="keycloak" {% if auth_type == 'keycloak' %}selected{% endif %}>Keycloak (OAuth2 client credentials)</option>
+                    </select>
+                    <div class="form-text">Choose how the chat call authenticates against the model server.</div>
+                </div>
+
+                <div id="api_key_block" {% if auth_type != 'api_key' %}hidden{% endif %}>
+                    <div class="mb-3">
+                        <label for="api_key" class="form-label">API Key</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="api_key" name="api_key"
+                                   value="{% if connection and connection.api_key %}********{% endif %}"
+                                   placeholder="sk-...">
+                            <button class="btn btn-outline-secondary" type="button"
+                                    onclick="this.previousElementSibling.type = this.previousElementSibling.type === 'password' ? 'text' : 'password'">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                        </div>
+                        <div class="form-text">Sent as <code>Authorization: Bearer &lt;key&gt;</code>. Leave as <code>********</code> to keep the existing key.</div>
                     </div>
-                    <div class="form-text">Leave as <code>********</code> to keep the existing key.</div>
+                </div>
+
+                <div id="keycloak_block" {% if auth_type != 'keycloak' %}hidden{% endif %}>
+                    <div class="mb-3">
+                        <label for="keycloak_url" class="form-label">Token URL</label>
+                        <input type="text" class="form-control" id="keycloak_url" name="keycloak_url"
+                               value="{{ connection.keycloak_url if connection and connection.keycloak_url else '' }}"
+                               placeholder="https://keycloak-aif.gt-t.net/realms/aif-llm/protocol/openid-connect/token">
+                        <div class="form-text">Keycloak <code>openid-connect/token</code> endpoint for the realm hosting the model.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="keycloak_client_id" class="form-label">Client ID</label>
+                        <input type="text" class="form-control" id="keycloak_client_id" name="keycloak_client_id"
+                               value="{{ connection.keycloak_client_id if connection and connection.keycloak_client_id else '' }}"
+                               placeholder="edgeui-dev">
+                    </div>
+                    <div class="mb-3">
+                        <label for="keycloak_client_secret" class="form-label">Client Secret</label>
+                        <div class="input-group">
+                            <input type="password" class="form-control" id="keycloak_client_secret" name="keycloak_client_secret"
+                                   value="{% if connection and connection.keycloak_client_secret %}********{% endif %}"
+                                   placeholder="">
+                            <button class="btn btn-outline-secondary" type="button"
+                                    onclick="this.previousElementSibling.type = this.previousElementSibling.type === 'password' ? 'text' : 'password'">
+                                <i class="bi bi-eye"></i>
+                            </button>
+                        </div>
+                        <div class="form-text">Used with <code>grant_type=client_credentials</code>. Leave as <code>********</code> to keep the existing secret.</div>
+                    </div>
                 </div>
 
                 <div class="mb-3">
