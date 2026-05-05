@@ -188,6 +188,12 @@ class OpenAICompatibleProvider(AIProvider):
         }
         if tools:
             payload["tools"] = tools
+        if kwargs.get("thinking"):
+            # vLLM forwards chat_template_kwargs into apply_chat_template().
+            # Gemma uses enable_thinking; preserve any caller-supplied kwargs.
+            existing = dict(payload.get("chat_template_kwargs") or {})
+            existing["enable_thinking"] = True
+            payload["chat_template_kwargs"] = existing
 
         async with httpx.AsyncClient(timeout=self.timeout, verify=self.ssl_verify) as client:
             resp = await client.post(url, json=payload, headers=headers)
@@ -463,6 +469,7 @@ class AIChatHandler:
         enabled_hooks: set[str] | None = None,
         user: dict | None = None,
         db: Session | None = None,
+        thinking: bool = False,
     ) -> dict:
         """Process a chat message and return the response."""
         # user_prompt_submit hooks: pipe the message through each hook.
@@ -483,7 +490,7 @@ class AIChatHandler:
         messages.append({"role": "user", "content": message})
 
         tools = self.registry.get_openai_tools(enabled_tools)
-        result = await self.provider.chat(messages, tools=tools or None)
+        result = await self.provider.chat(messages, tools=tools or None, thinking=thinking)
 
         tool_calls_made = []
 
@@ -543,7 +550,7 @@ class AIChatHandler:
                 })
 
             # Get final response after tool calls
-            final = await self.provider.chat(messages)
+            final = await self.provider.chat(messages, thinking=thinking)
             result["response"] = final["response"]
 
         return {
@@ -905,6 +912,7 @@ def create_ai_chat_router(admin) -> APIRouter:
         message = body.get("message", "").strip()
         if not message:
             return JSONResponse({"error": "Empty message"}, status_code=400)
+        thinking = bool(body.get("thinking", False))
 
         session_id = _get_session_id(request)
         is_new_session = not session_id
@@ -956,6 +964,7 @@ def create_ai_chat_router(admin) -> APIRouter:
                 enabled_hooks=enabled_hooks,
                 user=user,
                 db=db,
+                thinking=thinking,
             )
         except Exception as e:
             logger.exception("AI chat error")

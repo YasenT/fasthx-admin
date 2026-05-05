@@ -4,6 +4,7 @@
 (function () {
     const STORAGE_KEY_EXPANDED = 'ai_chat_expanded';
     const STORAGE_KEY_SIZE = 'ai_chat_size';
+    const STORAGE_KEY_THINKING = 'ai_chat_thinking';
 
     const widget = document.getElementById('ai-chat-widget');
     const toggle = document.getElementById('ai-chat-toggle');
@@ -14,11 +15,23 @@
     const input = document.getElementById('ai-chat-input');
     const messagesEl = document.getElementById('ai-chat-messages');
     const typingEl = document.getElementById('ai-chat-typing');
+    const thinkingBtn = document.getElementById('ai-chat-thinking-toggle');
 
     if (!widget) return;
 
     // --- State ---
     let expanded = localStorage.getItem(STORAGE_KEY_EXPANDED) === 'true';
+    let thinking = localStorage.getItem(STORAGE_KEY_THINKING) === 'true';
+
+    function setThinking(state) {
+        thinking = state;
+        localStorage.setItem(STORAGE_KEY_THINKING, state);
+        if (thinkingBtn) {
+            thinkingBtn.setAttribute('aria-pressed', state ? 'true' : 'false');
+            thinkingBtn.classList.toggle('btn-warning', state);
+            thinkingBtn.classList.toggle('btn-outline-secondary', !state);
+        }
+    }
 
     // --- Markdown rendering ---
     function renderMarkdown(text) {
@@ -171,6 +184,12 @@
         setExpanded(false);
     });
 
+    if (thinkingBtn) {
+        thinkingBtn.addEventListener('click', function () {
+            setThinking(!thinking);
+        });
+    }
+
     clearBtn.addEventListener('click', async function () {
         try {
             await fetch('/ai/clear', { method: 'POST' });
@@ -196,7 +215,7 @@
             const resp = await fetch('/ai/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message: message })
+                body: JSON.stringify({ message: message, thinking: thinking })
             });
 
             hideTyping();
@@ -244,5 +263,6 @@
 
     // --- Init ---
     setExpanded(expanded);
+    setThinking(thinking);
     loadHistory();
 })();
