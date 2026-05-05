@@ -22,7 +22,7 @@
     <div class="card">
         <div class="card-body">
             <p class="text-muted small mb-3">
-                In-memory event log (last 200 events, cleared on restart). Newest first.
+                Event log (last {{ events | length }} of up to 200, persisted in the database). Newest first.
             </p>
             {% if events %}
             <div class="table-responsive">

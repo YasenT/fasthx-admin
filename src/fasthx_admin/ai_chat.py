@@ -25,7 +25,7 @@ from typing import Any, Callable, Dict, List, Optional, get_type_hints
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from sqlalchemy import Boolean, Column, Float, Integer, String, Text, inspect, text
+from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, inspect, text
 from sqlalchemy.orm import Session
 
 from .database import Base, get_db, get_engine
@@ -36,29 +36,116 @@ _PACKAGE_DIR = Path(__file__).resolve().parent
 
 
 # ---------------------------------------------------------------------------
-# Diagnostics ring buffer
+# Diagnostics (Postgres-backed)
 # ---------------------------------------------------------------------------
-# Why in-memory: chat-side issues are diagnosed in the moment; persisting them
-# would mean a DB table + migrations for marginal value. Cleared on restart.
+# Earlier versions used an in-memory deque. That breaks multi-replica
+# deployments: a chat request lands on pod A (logs to its deque) while the
+# diagnostics page loads from pod B (sees empty). Persisting to the existing
+# DB makes the log visible across replicas and survive restarts.
+#
+# `_DIAGNOSTICS_FALLBACK` is only used if the DB write fails — never let a
+# logging error break a chat request.
 
-_DIAGNOSTICS: "collections.deque[dict]" = collections.deque(maxlen=200)
+_DIAGNOSTICS_MAX_ROWS = 200
+_DIAGNOSTICS_FALLBACK: "collections.deque[dict]" = collections.deque(maxlen=_DIAGNOSTICS_MAX_ROWS)
 
 
 def _log_diagnostic(event_type: str, detail: str, **extra: Any) -> None:
+    ts = datetime.datetime.now(datetime.timezone.utc)
     entry = {
-        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "ts": ts.isoformat(timespec="seconds"),
         "type": event_type,
         "detail": detail,
     }
     if extra:
         entry["extra"] = extra
-    _DIAGNOSTICS.append(entry)
     logger.info("ai_chat diagnostic: %s — %s", event_type, detail)
 
+    # Best-effort DB write. Never raise from a logging path.
+    try:
+        db = next(get_db())
+        try:
+            row = AIChatDiagnostic(
+                ts=ts,
+                event_type=event_type[:64],
+                detail=detail[:1000],
+                extra=json.dumps(extra) if extra else None,
+            )
+            db.add(row)
+            db.commit()
+            # Trim. We do this opportunistically rather than on every insert
+            # to avoid an N+1 — once every ~50 writes is enough to keep the
+            # table bounded to roughly _DIAGNOSTICS_MAX_ROWS.
+            if (row.id or 0) % 50 == 0:
+                _trim_diagnostics(db)
+        finally:
+            db.close()
+        return
+    except Exception:
+        logger.exception("ai_chat diagnostic DB write failed; falling back to memory")
+        _DIAGNOSTICS_FALLBACK.append(entry)
 
-def get_diagnostics() -> list[dict]:
+
+def _trim_diagnostics(db: Session) -> None:
+    """Delete rows older than the most recent _DIAGNOSTICS_MAX_ROWS."""
+    try:
+        cutoff = (
+            db.query(AIChatDiagnostic.id)
+            .order_by(AIChatDiagnostic.id.desc())
+            .offset(_DIAGNOSTICS_MAX_ROWS)
+            .first()
+        )
+        if cutoff:
+            db.query(AIChatDiagnostic).filter(
+                AIChatDiagnostic.id <= cutoff.id
+            ).delete(synchronize_session=False)
+            db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("ai_chat diagnostic trim failed")
+
+
+def get_diagnostics(db: Session | None = None) -> list[dict]:
     """Return diagnostics entries, newest first."""
-    return list(reversed(_DIAGNOSTICS))
+    own_session = db is None
+    if own_session:
+        db = next(get_db())
+    try:
+        rows = (
+            db.query(AIChatDiagnostic)
+            .order_by(AIChatDiagnostic.id.desc())
+            .limit(_DIAGNOSTICS_MAX_ROWS)
+            .all()
+        )
+        out: list[dict] = []
+        for r in rows:
+            entry: dict[str, Any] = {
+                "ts": r.ts.isoformat(timespec="seconds") if r.ts else "",
+                "type": r.event_type,
+                "detail": r.detail,
+            }
+            if r.extra:
+                try:
+                    entry["extra"] = json.loads(r.extra)
+                except (json.JSONDecodeError, TypeError):
+                    entry["extra"] = {"raw": r.extra}
+            out.append(entry)
+        # Append in-memory fallback (only present if DB writes have failed)
+        if _DIAGNOSTICS_FALLBACK:
+            out.extend(reversed(_DIAGNOSTICS_FALLBACK))
+        return out
+    except Exception:
+        logger.exception("ai_chat diagnostic read failed; using fallback")
+        return list(reversed(_DIAGNOSTICS_FALLBACK))
+    finally:
+        if own_session:
+            db.close()
+
+
+def clear_diagnostics(db: Session) -> None:
+    db.query(AIChatDiagnostic).delete(synchronize_session=False)
+    db.commit()
+    _DIAGNOSTICS_FALLBACK.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -675,8 +762,28 @@ class AIChatHandler:
 
         tool_calls_made = []
 
-        # Handle tool calls
-        if result.get("tool_calls"):
+        # Bounded agentic loop. Some models (notably Gemma when its
+        # tool-call template misfires) return another tool call instead of
+        # a summary on the post-tool turn. We iterate so the conversation
+        # converges on a real answer rather than dead-ending in markup.
+        MAX_TOOL_ITERATIONS = 6
+        iteration = 0
+        while result.get("tool_calls"):
+            iteration += 1
+            if iteration > MAX_TOOL_ITERATIONS:
+                _log_diagnostic(
+                    "tool_iteration_exceeded",
+                    f"Stopped after {MAX_TOOL_ITERATIONS} tool iterations without a final answer",
+                    last_response_len=len(result.get("response") or ""),
+                )
+                if not result.get("response"):
+                    result["response"] = (
+                        "The model kept requesting tools and didn't produce a final "
+                        "answer after several attempts. The data has been gathered — "
+                        "please try rephrasing your question."
+                    )
+                break
+
             # Add assistant message with tool calls
             messages.append({
                 "role": "assistant",
@@ -730,13 +837,9 @@ class AIChatHandler:
                     "content": tool_result,
                 })
 
-            # Get final response after tool calls
-            final = await self.provider.chat(messages, thinking=thinking)
-            result["response"] = final["response"]
-            # Prefer the final-call thinking when present, otherwise keep
-            # whatever came back from the first call.
-            if final.get("thinking"):
-                result["thinking"] = final["thinking"]
+            # Next turn — model should produce a final answer or another
+            # round of tool calls (in which case we loop again).
+            result = await self.provider.chat(messages, thinking=thinking)
 
         return {
             "response": result["response"],
@@ -756,6 +859,16 @@ class AIChatSettings(Base):
     id = Column(Integer, primary_key=True)
     key = Column(String(255), unique=True, nullable=False)
     value = Column(Text)
+
+
+class AIChatDiagnostic(Base):
+    __tablename__ = "fasthx_admin_ai_diagnostics"
+
+    id = Column(Integer, primary_key=True)
+    ts = Column(DateTime(timezone=True), nullable=False, index=True)
+    event_type = Column(String(64), nullable=False, index=True)
+    detail = Column(String(1000), nullable=False, default="")
+    extra = Column(Text, nullable=True)
 
 
 AUTH_TYPE_API_KEY = "api_key"
@@ -817,6 +930,7 @@ def ensure_ai_tables():
     engine = get_engine()
     AIChatSettings.__table__.create(bind=engine, checkfirst=True)
     AIChatConnection.__table__.create(bind=engine, checkfirst=True)
+    AIChatDiagnostic.__table__.create(bind=engine, checkfirst=True)
     _ensure_connection_columns(engine)
 
 
@@ -1328,16 +1442,16 @@ def create_ai_chat_router(admin) -> APIRouter:
         return RedirectResponse("/ai/settings", status_code=303)
 
     @router.get("/diagnostics", response_class=HTMLResponse)
-    async def diagnostics_page(request: Request):
+    async def diagnostics_page(request: Request, db: Session = Depends(get_db)):
         return templates.TemplateResponse("ai_diagnostics.html", {
             "request": request,
-            "events": get_diagnostics(),
+            "events": get_diagnostics(db),
             "active_page": "ai_diagnostics",
         })
 
     @router.post("/diagnostics/clear")
-    async def diagnostics_clear():
-        _DIAGNOSTICS.clear()
+    async def diagnostics_clear(db: Session = Depends(get_db)):
+        clear_diagnostics(db)
         return RedirectResponse("/ai/diagnostics", status_code=303)
 
     @router.get("/settings/context", response_class=HTMLResponse)
