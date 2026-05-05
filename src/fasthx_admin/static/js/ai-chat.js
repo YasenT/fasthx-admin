@@ -78,10 +78,23 @@
         typingEl.style.display = 'none';
     }
 
-    function addMessage(role, content) {
+    function addMessage(role, content, thinking) {
         // Remove welcome message if present
         const welcome = messagesEl.querySelector('.ai-chat-welcome');
         if (welcome) welcome.remove();
+
+        if (role !== 'user' && thinking) {
+            const det = document.createElement('details');
+            det.className = 'ai-chat-thought';
+            const sum = document.createElement('summary');
+            sum.innerHTML = '<i class="bi bi-lightbulb"></i> Thought process';
+            det.appendChild(sum);
+            const body = document.createElement('div');
+            body.className = 'ai-chat-thought-body';
+            body.innerHTML = renderMarkdown(thinking);
+            det.appendChild(body);
+            messagesEl.appendChild(det);
+        }
 
         const bubble = document.createElement('div');
         bubble.className = 'ai-chat-bubble ' +
@@ -235,7 +248,7 @@
                 });
             }
 
-            addMessage('ai', data.response);
+            addMessage('ai', data.response, data.thinking);
         } catch (err) {
             hideTyping();
             addMessage('ai', 'Error: Could not reach the AI service.');

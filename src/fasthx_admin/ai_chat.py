@@ -11,9 +11,12 @@ Provides a pluggable AI chat widget with:
 from __future__ import annotations
 
 import asyncio
+import collections
+import datetime
 import inspect as python_inspect
 import json
 import logging
+import re
 import time
 import uuid
 from abc import ABC, abstractmethod
@@ -30,6 +33,143 @@ from .database import Base, get_db, get_engine
 logger = logging.getLogger("fasthx_admin.ai_chat")
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
+
+
+# ---------------------------------------------------------------------------
+# Diagnostics ring buffer
+# ---------------------------------------------------------------------------
+# Why in-memory: chat-side issues are diagnosed in the moment; persisting them
+# would mean a DB table + migrations for marginal value. Cleared on restart.
+
+_DIAGNOSTICS: "collections.deque[dict]" = collections.deque(maxlen=200)
+
+
+def _log_diagnostic(event_type: str, detail: str, **extra: Any) -> None:
+    entry = {
+        "ts": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+        "type": event_type,
+        "detail": detail,
+    }
+    if extra:
+        entry["extra"] = extra
+    _DIAGNOSTICS.append(entry)
+    logger.info("ai_chat diagnostic: %s — %s", event_type, detail)
+
+
+def get_diagnostics() -> list[dict]:
+    """Return diagnostics entries, newest first."""
+    return list(reversed(_DIAGNOSTICS))
+
+
+# ---------------------------------------------------------------------------
+# Gemma tool-call fallback parser
+# ---------------------------------------------------------------------------
+# When vLLM's tool-call parser can't recognize the model output, it returns the
+# raw template tokens as content. We regex out a best-effort tool call so the
+# user gets a working answer instead of "<|tool_call>..." gibberish.
+
+_GEMMA_TOOL_CALL_RE = re.compile(r"<\|tool_call>(.+?)<tool_call\|>", re.DOTALL)
+# Inside the wrapper we accept three observed shapes:
+#   call:fn{key:<|"|>val<|"|>,key:<|"|>val<|"|>}     (the malformed one)
+#   fn(key="val", key="val")                          (canonical pythonic)
+#   {"name":"fn","arguments":{...}}                   (Hermes-style JSON)
+_GEMMA_PYTHONIC_RE = re.compile(
+    r"(?:call:)?\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*[\{\(](.*)[\}\)]\s*$",
+    re.DOTALL,
+)
+
+
+def _normalize_gemma_quotes(s: str) -> str:
+    """Convert Gemma's <|"|> quote tokens back to standard quotes."""
+    return s.replace("<|\"|>", '"').replace("<|'|>", "'")
+
+
+def _parse_gemma_tool_call(content: str) -> dict | None:
+    """Best-effort parse of a malformed Gemma tool call from raw content.
+
+    Returns an OpenAI-shaped tool_call dict, or None if nothing recoverable.
+    """
+    if not content or "<|tool_call" not in content:
+        return None
+
+    match = _GEMMA_TOOL_CALL_RE.search(content)
+    if not match:
+        return None
+
+    body = _normalize_gemma_quotes(match.group(1).strip())
+
+    # Try Hermes-style JSON first.
+    if body.startswith("{") and "\"name\"" in body:
+        try:
+            obj = json.loads(body)
+            return {
+                "id": f"call_{uuid.uuid4().hex[:12]}",
+                "type": "function",
+                "function": {
+                    "name": obj["name"],
+                    "arguments": json.dumps(obj.get("arguments") or {}),
+                },
+            }
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    m = _GEMMA_PYTHONIC_RE.match(body)
+    if not m:
+        return None
+    fn_name, args_blob = m.group(1), m.group(2).strip()
+
+    args: dict[str, Any] = {}
+    # Split on commas not inside quotes — naive but sufficient for the
+    # observed shapes (no nested objects in real tool args).
+    parts = re.findall(r'([a-zA-Z_][a-zA-Z0-9_]*)\s*[:=]\s*("(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'|[^,]+)', args_blob)
+    for key, raw in parts:
+        raw = raw.strip().rstrip(",").strip()
+        if (raw.startswith('"') and raw.endswith('"')) or (raw.startswith("'") and raw.endswith("'")):
+            args[key] = raw[1:-1]
+        else:
+            try:
+                args[key] = json.loads(raw)
+            except json.JSONDecodeError:
+                args[key] = raw
+
+    return {
+        "id": f"call_{uuid.uuid4().hex[:12]}",
+        "type": "function",
+        "function": {
+            "name": fn_name,
+            "arguments": json.dumps(args),
+        },
+    }
+
+
+# ---------------------------------------------------------------------------
+# Thinking extraction
+# ---------------------------------------------------------------------------
+# Two paths: vLLM's reasoning parser puts the chain-of-thought in
+# `reasoning_content`; without it, the thoughts arrive inline in `content`
+# wrapped in <think>...</think> or <|think|>...<|/think|> tags.
+
+_THINK_RE = re.compile(
+    r"(?:<\|think\|>|<think>)(.*?)(?:<\|/think\|>|</think>)",
+    re.DOTALL,
+)
+
+
+def _extract_thinking(message: dict) -> tuple[str, str]:
+    """Return (thinking_text, cleaned_content). Either may be empty."""
+    reasoning = message.get("reasoning_content") or ""
+    content = message.get("content") or ""
+
+    if reasoning:
+        return reasoning.strip(), content
+
+    matches = _THINK_RE.findall(content)
+    if not matches:
+        return "", content
+
+    thoughts = "\n\n".join(t.strip() for t in matches if t.strip())
+    cleaned = _THINK_RE.sub("", content).strip()
+    return thoughts, cleaned
 
 
 # ---------------------------------------------------------------------------
@@ -203,10 +343,51 @@ class OpenAICompatibleProvider(AIProvider):
         choice = data["choices"][0]
         message = choice["message"]
         tool_calls = message.get("tool_calls")
+        content = message.get("content") or ""
+
+        # Fallback: vLLM couldn't parse the tool call but the raw markup is
+        # still in `content`. Try to recover so the tool actually fires.
+        if not tool_calls and "<|tool_call" in content:
+            recovered = _parse_gemma_tool_call(content)
+            if recovered:
+                tool_calls = [recovered]
+                _log_diagnostic(
+                    "tool_call_fallback_parsed",
+                    f"Recovered malformed tool call: {recovered['function']['name']}",
+                    model=self.model,
+                )
+                content = ""
+            else:
+                _log_diagnostic(
+                    "tool_call_unparseable",
+                    "Tool-call markup in content but fallback could not extract a call",
+                    model=self.model,
+                    snippet=content[:200],
+                )
+
+        thinking, cleaned = _extract_thinking({**message, "content": content})
+
+        # When the user has thinking mode on, record what vLLM actually
+        # returned. This is the only way to tell whether the server-side
+        # reasoning parser is configured, whether the model emitted any
+        # thinking tokens at all, and what tag format it used.
+        if kwargs.get("thinking"):
+            raw_reasoning = message.get("reasoning_content") or ""
+            raw_content = message.get("content") or ""
+            _log_diagnostic(
+                "thinking_response",
+                f"thinking_len={len(thinking)} content_len={len(cleaned)}",
+                model=self.model,
+                had_reasoning_content=bool(raw_reasoning),
+                had_think_tags=bool(_THINK_RE.search(raw_content)),
+                content_snippet=raw_content[:500],
+                reasoning_snippet=raw_reasoning[:500],
+            )
 
         return {
-            "response": message.get("content") or "",
+            "response": cleaned,
             "tool_calls": tool_calls,
+            "thinking": thinking,
         }
 
     def get_config_fields(self) -> list[dict]:
@@ -552,10 +733,15 @@ class AIChatHandler:
             # Get final response after tool calls
             final = await self.provider.chat(messages, thinking=thinking)
             result["response"] = final["response"]
+            # Prefer the final-call thinking when present, otherwise keep
+            # whatever came back from the first call.
+            if final.get("thinking"):
+                result["thinking"] = final["thinking"]
 
         return {
             "response": result["response"],
             "tool_calls": tool_calls_made,
+            "thinking": result.get("thinking", ""),
         }
 
 
@@ -970,7 +1156,8 @@ def create_ai_chat_router(admin) -> APIRouter:
             logger.exception("AI chat error")
             return JSONResponse({"error": str(e)}, status_code=500)
 
-        # Update history
+        # Update history. Per Gemma docs, strip thoughts from prior turns
+        # before passing history forward — only the cleaned response goes in.
         history.append({"role": "user", "content": message})
         history.append({"role": "assistant", "content": result["response"]})
         _save_history(session_id, history)
@@ -978,6 +1165,7 @@ def create_ai_chat_router(admin) -> APIRouter:
         response = JSONResponse({
             "response": result["response"],
             "tool_calls": result["tool_calls"],
+            "thinking": result.get("thinking", ""),
         })
         if not request.cookies.get("fasthx_chat_sid"):
             response.set_cookie("fasthx_chat_sid", session_id, httponly=True, samesite="lax")
@@ -1138,6 +1326,19 @@ def create_ai_chat_router(admin) -> APIRouter:
                     db.commit()
         _invalidate_settings_cache()
         return RedirectResponse("/ai/settings", status_code=303)
+
+    @router.get("/diagnostics", response_class=HTMLResponse)
+    async def diagnostics_page(request: Request):
+        return templates.TemplateResponse("ai_diagnostics.html", {
+            "request": request,
+            "events": get_diagnostics(),
+            "active_page": "ai_diagnostics",
+        })
+
+    @router.post("/diagnostics/clear")
+    async def diagnostics_clear():
+        _DIAGNOSTICS.clear()
+        return RedirectResponse("/ai/diagnostics", status_code=303)
 
     @router.get("/settings/context", response_class=HTMLResponse)
     async def context_settings_page(request: Request, db: Session = Depends(get_db)):

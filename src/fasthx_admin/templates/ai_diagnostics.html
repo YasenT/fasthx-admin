@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+
+{% block title %}AI Diagnostics{% endblock %}
+{% block page_title %}AI Diagnostics{% endblock %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <a href="/ai/settings" class="btn btn-outline-secondary btn-sm">
+                <i class="bi bi-arrow-left"></i> Back to AI Settings
+            </a>
+        </div>
+        <form method="post" action="/ai/diagnostics/clear" class="d-inline"
+              onsubmit="return confirm('Clear all diagnostic events?');">
+            <button type="submit" class="btn btn-outline-danger btn-sm" {% if not events %}disabled{% endif %}>
+                <i class="bi bi-trash"></i> Clear
+            </button>
+        </form>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <p class="text-muted small mb-3">
+                In-memory event log (last 200 events, cleared on restart). Newest first.
+            </p>
+            {% if events %}
+            <div class="table-responsive">
+                <table class="table table-sm align-middle">
+                    <thead>
+                        <tr>
+                            <th style="width: 18%;">Time (UTC)</th>
+                            <th style="width: 22%;">Event</th>
+                            <th>Detail</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for ev in events %}
+                        <tr>
+                            <td><code class="text-muted small">{{ ev.ts }}</code></td>
+                            <td>
+                                {% if ev.type == 'tool_call_fallback_parsed' %}
+                                <span class="badge bg-warning text-dark">{{ ev.type }}</span>
+                                {% elif ev.type == 'tool_call_unparseable' %}
+                                <span class="badge bg-danger">{{ ev.type }}</span>
+                                {% else %}
+                                <span class="badge bg-secondary">{{ ev.type }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div>{{ ev.detail }}</div>
+                                {% if ev.extra %}
+                                <details class="mt-1">
+                                    <summary class="small text-muted">Extra</summary>
+                                    <pre class="small mb-0"><code>{{ ev.extra | tojson(indent=2) }}</code></pre>
+                                </details>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% else %}
+            <div class="text-muted fst-italic">No diagnostic events recorded.</div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

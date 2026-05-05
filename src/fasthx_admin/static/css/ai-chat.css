@@ -214,6 +214,49 @@
     border-radius: 3px;
 }
 
+/* Thought-process block (rendered when thinking mode is on) */
+.ai-chat-thought {
+    margin: 4px 8px 2px;
+    padding: 6px 10px;
+    border-left: 2px solid var(--bs-warning);
+    background: var(--bs-tertiary-bg);
+    border-radius: 4px;
+    font-size: 0.8rem;
+    color: var(--bs-secondary-color);
+}
+
+.ai-chat-thought summary {
+    cursor: pointer;
+    font-weight: 500;
+    list-style: none;
+    user-select: none;
+}
+
+.ai-chat-thought summary::-webkit-details-marker {
+    display: none;
+}
+
+.ai-chat-thought summary i {
+    margin-right: 4px;
+    color: var(--bs-warning);
+}
+
+.ai-chat-thought-body {
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px dashed var(--bs-border-color);
+    white-space: pre-wrap;
+}
+
+.ai-chat-thought-body p {
+    margin-bottom: 0.4rem;
+}
+
+/* Thinking toggle button — visible when active */
+.ai-chat-thinking-btn[aria-pressed="true"] {
+    border-color: var(--bs-warning);
+}
+
 /* Responsive */
 @media (max-width: 480px) {
     .ai-chat-panel {
