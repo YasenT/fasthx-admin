@@ -199,8 +199,9 @@ function getAjaxTomSelectOptions(el) {
             return ajaxUrl + '?q=' + encodeURIComponent(query) + '&page=1';
         },
         shouldLoad: function () { return true; },
-        load: function (url, callback) {
+        load: function (query, callback) {
             var self = this;
+            var url = self.getUrl(query);
             fetch(url)
                 .then(function (resp) { return resp.json(); })
                 .then(function (data) {
@@ -210,7 +211,7 @@ function getAjaxTomSelectOptions(el) {
                         return;
                     }
                     if (data && data.next) {
-                        self.setNextUrl(self.lastValue, data.next);
+                        self.setNextUrl(query, data.next);
                     }
                     callback((data && data.items) || []);
                 })
