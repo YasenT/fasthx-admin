@@ -61,6 +61,18 @@
               class="form-control" rows="3"
               {% if field.required %}required{% endif %}>{{ field.value or '' }}</textarea>
 
+    {% elif field.type == 'file' %}
+    <label for="{{ field.key }}" class="form-label">
+        {{ field.label }}
+        {% if field.required and not field.value %}<span class="text-danger">*</span>{% endif %}
+        {% if field.get('description') %}<i class="bi bi-info-circle text-muted ms-1" data-bs-toggle="tooltip" data-bs-placement="top" title="{{ field.description }}"></i>{% endif %}
+    </label>
+    <input type="file" name="{{ field.key }}" id="{{ field.key }}"
+           class="form-control"
+           {% if field.get('allowed_extensions') %}accept="{% for e in field.allowed_extensions %}.{{ e }}{% if not loop.last %},{% endif %}{% endfor %}"{% endif %}
+           {% if field.required and not field.value %}required{% endif %}>
+    {% if field.value %}<div class="form-text">Current: <code>{{ field.value }}</code> — choose a file to replace it.</div>{% endif %}
+
     {% else %}
     <label for="{{ field.key }}" class="form-label">
         {{ field.label }}

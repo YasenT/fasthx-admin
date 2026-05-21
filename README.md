@@ -19,6 +19,7 @@ A modern admin interface framework for FastAPI built with HTMX, Jinja2, and Boot
   - [Detail View](#detail-view)
   - [Form Sections (Accordion Groups)](#form-sections-accordion-groups)
   - [Form Widget Overrides](#form-widget-overrides)
+  - [File Upload Fields](#file-upload-fields)
   - [AJAX Select (Searchable Foreign Keys)](#ajax-select-searchable-foreign-keys)
   - [Row Actions](#row-actions)
   - [Multi Row Actions](#multi-row-actions)
@@ -490,7 +491,7 @@ Customize individual form fields with extra attributes or replace their type ent
 
 | Key | Description | Example |
 |-----|-------------|---------|
-| `type` | Change the HTML input type. Use `"select"` for dropdowns, `"textarea"` for multi-line text, `"checkbox"` for booleans, or any HTML input type (`"text"`, `"number"`, `"email"`, `"date"`, etc.) | `"type": "select"` |
+| `type` | Change the HTML input type. Use `"select"` for dropdowns, `"textarea"` for multi-line text, `"checkbox"` for booleans, `"file"` for uploads (see [File Upload Fields](#file-upload-fields)), or any HTML input type (`"text"`, `"number"`, `"email"`, `"date"`, etc.) | `"type": "select"` |
 | `choices` | List of `(value, label)` tuples for `select` fields | `"choices": [("v1", "Version 1")]` |
 | `label` | Override the auto-generated field label | `"label": "Firmware"` |
 | `required` | Override whether the field shows as required | `"required": False` |
@@ -585,6 +586,61 @@ class CustomerView(CRUDView):
 ```
 
 Hovering over the info icon displays the tooltip. Works on all field types including checkboxes, selects, and AJAX selects.
+
+### File Upload Fields
+
+Set `"type": "file"` on a string column to render a file input that saves the uploaded file to disk and stores its (relative) filename on the column. This is the fasthx-admin equivalent of Flask-Admin's `FileUploadField` configured via `form_args`.
+
+The form automatically switches to `multipart/form-data` (including the HTMX `hx-encoding`) whenever a file field is present, so the binary is transmitted correctly.
+
+**Supported keys** (set inside the field's `form_widget_overrides` entry):
+
+| Key | Description |
+|-----|-------------|
+| `base_path` | **Required.** Absolute directory the uploaded file is written under. |
+| `relative_path` | Optional sub-path under `base_path`. It is also prefixed onto the value stored in the column. Default `""`. |
+| `allowed_extensions` | List of permitted extensions, e.g. `["lic"]` or `["png", "jpg"]`. Rejected uploads raise a `ValidationError`. Also drives the file picker's `accept` filter. |
+| `allow_overwrite` | If `False`, refuse to overwrite an existing file of the same name. Default `True`. |
+| `namegen` | Optional callable `namegen(item, upload) -> str` returning the filename to save. `item` is the model instance (already populated with the other submitted fields), `upload` is a Starlette `UploadFile` (`upload.filename`). Defaults to the sanitized uploaded filename. |
+
+**Behavior:**
+
+- The value persisted on the column is the saved filename (prefixed with `relative_path` if set) — not the raw upload. Reconstruct the full path with `os.path.join(base_path, value)`.
+- On **edit**, leaving the file input empty keeps the existing value. Choosing a new file replaces it (and the form shows the current filename as a hint).
+- A `required` file field is only enforced on **create** (when the column has no existing value).
+- Cleaning up files on delete is your responsibility — do it in `on_model_delete`.
+
+**Example:**
+
+```python
+import os, re
+
+def license_name_generator(item, upload):
+    """Name the saved file after the device serial; fall back to the upload name."""
+    stem = item.serial_number or os.path.splitext(os.path.basename(upload.filename))[0]
+    return f"{re.sub(r'[^A-Za-z0-9_.-]', '_', str(stem))}.lic"
+
+class EdgeView(CRUDView):
+    model = Edge
+    form_columns = ["serial_number", "license_file"]
+    form_widget_overrides = {
+        "license_file": {
+            "type": "file",
+            "label": "License",
+            "base_path": "/app/licenses/",
+            "allowed_extensions": ["lic"],
+            "allow_overwrite": True,
+            "namegen": license_name_generator,
+        },
+    }
+
+    def on_model_delete(self, item, db):
+        # Remove the uploaded file when the row is deleted
+        if item.license_file:
+            path = os.path.join("/app/licenses/", item.license_file)
+            if os.path.exists(path):
+                os.remove(path)
+```
 
 ### AJAX Select (Searchable Foreign Keys)
 

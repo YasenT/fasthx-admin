@@ -13,6 +13,8 @@ import functools
 import io
 import json
 import math
+import os
+import re
 from collections import defaultdict
 from inspect import Parameter, signature
 from pathlib import Path
@@ -44,6 +46,13 @@ COLUMN_TYPE_MAP = {
     "Date": "date",
     "Enum": "select",
 }
+
+
+def _secure_filename(name: str) -> str:
+    """Strip directory components and unsafe characters from an upload name."""
+    name = os.path.basename(name or "")
+    name = re.sub(r"[^A-Za-z0-9_.-]", "_", name)
+    return name or "upload"
 
 # Maps SQLAlchemy column type names to available filter operations.
 # Each operation is (key, label) where key is used in the URL.
@@ -1938,6 +1947,11 @@ class CRUDView:
             key = field["key"]
             if field.get("virtual"):
                 continue
+            if field.get("type") == "file":
+                # File uploads need special handling: save to disk and store
+                # the resulting filename on the column (not the UploadFile).
+                self._apply_file_field(item, field, form_data)
+                continue
             if key in form_data:
                 value = form_data[key]
                 col = mapper.columns[key]
@@ -1967,6 +1981,56 @@ class CRUDView:
                 col = mapper.columns.get(key)
                 if col is not None and type(col.type).__name__.upper() == "BOOLEAN":
                     setattr(item, key, False)
+
+    def _apply_file_field(self, item, field, form_data):
+        """Save an uploaded file for a ``type: "file"`` form field.
+
+        The uploaded file is written to disk and the resulting (relative) name
+        is stored on the model column. Behaviour is configured via
+        ``form_widget_overrides`` (mirrors Flask-Admin's FileUploadField args):
+
+            base_path          directory files are saved under (required)
+            relative_path      sub-path under base_path, also prefixed on the
+                               stored column value (default "")
+            allowed_extensions list of permitted extensions, e.g. ["lic"]
+            allow_overwrite    if False, refuse to clobber an existing file
+                               (default True)
+            namegen            optional callable(item, upload) -> filename;
+                               defaults to the sanitized uploaded filename
+        """
+        key = field["key"]
+        upload = form_data.get(key)
+        filename = getattr(upload, "filename", "") if upload is not None else ""
+        label = field.get("label") or key.replace("_", " ").title()
+
+        # No new file submitted: keep any existing value; enforce required on create.
+        if not filename:
+            if field.get("required") and not getattr(item, key, None):
+                raise ValidationError(f"{label} is required")
+            return
+
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        allowed = [str(e).lower().lstrip(".") for e in (field.get("allowed_extensions") or [])]
+        if allowed and ext not in allowed:
+            raise ValidationError(f"{label}: only {', '.join(allowed)} files are allowed")
+
+        namegen = field.get("namegen")
+        target_name = namegen(item, upload) if callable(namegen) else _secure_filename(filename)
+
+        relative_path = field.get("relative_path", "") or ""
+        base_path = field.get("base_path", "") or ""
+        stored = os.path.join(relative_path, target_name) if relative_path else target_name
+        dest = os.path.join(base_path, stored)
+
+        if not field.get("allow_overwrite", True) and os.path.exists(dest):
+            raise ValidationError(f"{label}: '{target_name}' already exists")
+
+        os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
+        data = upload.file.read()
+        with open(dest, "wb") as fh:
+            fh.write(data)
+
+        setattr(item, key, stored)
 
     def _audit_snapshot(self, item) -> dict:
         """Capture a dict of column values from a model instance, dropping excluded fields."""

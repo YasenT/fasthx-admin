@@ -12,7 +12,8 @@
 
 <div class="card">
     <div class="card-body">
-        <form method="post" action="{{ action }}" hx-boost="true" novalidate>
+        {% set has_file = form_fields | selectattr('type', 'equalto', 'file') | list | length > 0 %}
+        <form method="post" action="{{ action }}" hx-boost="true"{% if has_file %} enctype="multipart/form-data" hx-encoding="multipart/form-data"{% endif %} novalidate>
             {% if form_sections %}
             <div class="accordion" id="formAccordion">
                 {% for section_name, section_fields in form_sections.items() %}

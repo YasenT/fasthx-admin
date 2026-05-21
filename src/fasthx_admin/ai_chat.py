@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, get_type_hints
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, inspect, text
 from sqlalchemy.orm import Session
 
@@ -738,8 +738,15 @@ class AIChatHandler:
         user: dict | None = None,
         db: Session | None = None,
         thinking: bool = False,
+        progress_callback: Callable[[dict], Any] | None = None,
+        images: list[str] | None = None,
     ) -> dict:
-        """Process a chat message and return the response."""
+        """Process a chat message and return the response.
+
+        Images are only attached to the current turn — historical turns are
+        stored text-only by the endpoint, so cookie/session payloads stay
+        small and the model never re-sees old base64 blobs.
+        """
         # user_prompt_submit hooks: pipe the message through each hook.
         message = await self.registry.run_hooks_pipe(
             "user_prompt_submit",
@@ -755,7 +762,15 @@ class AIChatHandler:
         if system_prompt:
             messages.append({"role": "system", "content": system_prompt})
         messages.extend(history)
-        messages.append({"role": "user", "content": message})
+        if images:
+            user_content: list[dict] = []
+            if message:
+                user_content.append({"type": "text", "text": message})
+            for img in images:
+                user_content.append({"type": "image_url", "image_url": {"url": img}})
+            messages.append({"role": "user", "content": user_content})
+        else:
+            messages.append({"role": "user", "content": message})
 
         tools = self.registry.get_openai_tools(enabled_tools)
         result = await self.provider.chat(messages, tools=tools or None, thinking=thinking)
@@ -783,6 +798,21 @@ class AIChatHandler:
                         "please try rephrasing your question."
                     )
                 break
+
+            if progress_callback:
+                tool_names = [
+                    tc.get("function", {}).get("name", "tool")
+                    for tc in result["tool_calls"]
+                ]
+                ev = {
+                    "type": "tool_iteration",
+                    "iteration": iteration,
+                    "max_iterations": MAX_TOOL_ITERATIONS,
+                    "tools": tool_names,
+                }
+                cb_result = progress_callback(ev)
+                if python_inspect.isawaitable(cb_result):
+                    await cb_result
 
             # Add assistant message with tool calls
             messages.append({
@@ -1210,9 +1240,26 @@ def create_ai_chat_router(admin) -> APIRouter:
 
         body = await request.json()
         message = body.get("message", "").strip()
-        if not message:
-            return JSONResponse({"error": "Empty message"}, status_code=400)
         thinking = bool(body.get("thinking", False))
+
+        # Images arrive as data: URLs from the widget. Keep only well-formed
+        # entries and cap count/size so a runaway client can't OOM the worker.
+        raw_images = body.get("images") or []
+        images: list[str] = []
+        if isinstance(raw_images, list):
+            for img in raw_images[:8]:
+                if (
+                    isinstance(img, str)
+                    and img.startswith("data:image/")
+                    and len(img) <= 8 * 1024 * 1024  # ~6 MB raw after base64 decode
+                ):
+                    images.append(img)
+
+        if not message and not images:
+            return JSONResponse({"error": "Empty message"}, status_code=400)
+        # History placeholder when only images were sent — gives the model a
+        # hint when this turn rolls into history on subsequent turns.
+        history_text = message or "[Image]"
 
         session_id = _get_session_id(request)
         is_new_session = not session_id
@@ -1257,33 +1304,98 @@ def create_ai_chat_router(admin) -> APIRouter:
             )
 
         handler = AIChatHandler(provider, tool_registry)
-        try:
-            result = await handler.chat(
-                message, history, system_prompt,
-                enabled_tools=enabled_tools,
-                enabled_hooks=enabled_hooks,
-                user=user,
-                db=db,
-                thinking=thinking,
-            )
-        except Exception as e:
-            logger.exception("AI chat error")
-            return JSONResponse({"error": str(e)}, status_code=500)
 
-        # Update history. Per Gemma docs, strip thoughts from prior turns
-        # before passing history forward — only the cleaned response goes in.
-        history.append({"role": "user", "content": message})
-        history.append({"role": "assistant", "content": result["response"]})
-        _save_history(session_id, history)
+        wants_stream = "text/event-stream" in (request.headers.get("accept") or "")
 
-        response = JSONResponse({
-            "response": result["response"],
-            "tool_calls": result["tool_calls"],
-            "thinking": result.get("thinking", ""),
-        })
+        if not wants_stream:
+            try:
+                result = await handler.chat(
+                    message, history, system_prompt,
+                    enabled_tools=enabled_tools,
+                    enabled_hooks=enabled_hooks,
+                    user=user,
+                    db=db,
+                    thinking=thinking,
+                    images=images,
+                )
+            except Exception as e:
+                logger.exception("AI chat error")
+                return JSONResponse({"error": str(e)}, status_code=500)
+
+            history.append({"role": "user", "content": history_text})
+            history.append({"role": "assistant", "content": result["response"]})
+            _save_history(session_id, history)
+
+            response = JSONResponse({
+                "response": result["response"],
+                "tool_calls": result["tool_calls"],
+                "thinking": result.get("thinking", ""),
+            })
+            if not request.cookies.get("fasthx_chat_sid"):
+                response.set_cookie("fasthx_chat_sid", session_id, httponly=True, samesite="lax")
+            return response
+
+        # --- SSE streaming path ---
+        # Bridge the handler's progress_callback to an asyncio.Queue that the
+        # streaming generator drains.  Sending None signals end-of-stream.
+        queue: asyncio.Queue = asyncio.Queue()
+
+        async def progress_cb(event: dict) -> None:
+            await queue.put(event)
+
+        async def run_chat_task() -> None:
+            try:
+                result = await handler.chat(
+                    message, history, system_prompt,
+                    enabled_tools=enabled_tools,
+                    enabled_hooks=enabled_hooks,
+                    user=user,
+                    db=db,
+                    thinking=thinking,
+                    progress_callback=progress_cb,
+                    images=images,
+                )
+                history.append({"role": "user", "content": history_text})
+                history.append({"role": "assistant", "content": result["response"]})
+                _save_history(session_id, history)
+                await queue.put({
+                    "type": "done",
+                    "response": result["response"],
+                    "tool_calls": result["tool_calls"],
+                    "thinking": result.get("thinking", ""),
+                })
+            except Exception as e:
+                logger.exception("AI chat error (stream)")
+                await queue.put({"type": "error", "error": str(e)})
+            finally:
+                await queue.put(None)
+
+        async def event_stream():
+            chat_task = asyncio.create_task(run_chat_task())
+            try:
+                while True:
+                    ev = await queue.get()
+                    if ev is None:
+                        break
+                    yield f"data: {json.dumps(ev)}\n\n"
+            finally:
+                if not chat_task.done():
+                    chat_task.cancel()
+
+        headers = {
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",  # disable proxy buffering (nginx etc.)
+        }
+        stream_response = StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers=headers,
+        )
         if not request.cookies.get("fasthx_chat_sid"):
-            response.set_cookie("fasthx_chat_sid", session_id, httponly=True, samesite="lax")
-        return response
+            stream_response.set_cookie(
+                "fasthx_chat_sid", session_id, httponly=True, samesite="lax"
+            )
+        return stream_response
 
     @router.post("/clear")
     async def clear_chat(request: Request):
