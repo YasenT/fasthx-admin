@@ -786,13 +786,13 @@ class OfferingView(CRUDView):
     ]
 ```
 
-Define the bulk action endpoint on your view. Selected IDs are sent as `ids` form data:
+Define the bulk action endpoint on your view. Selected IDs are sent as a **single** `ids` form field whose value is a comma-joined string (see the [wire format note](#wire-format-and-50000-row-cap) below for why):
 
 ```python
 @CRUDView.endpoint("/{name}/bulk-delete", methods=["POST"], response_class=HTMLResponse)
 async def bulk_delete(self, request: Request, db: Session = Depends(get_db)):
     form = await request.form()
-    ids = form.getlist("ids")
+    ids = [i for i in form.get("ids", "").split(",") if i]
     db.query(self.model).filter(self.model.id.in_(ids)).delete(synchronize_session=False)
     db.commit()
     return toast_response(f"Deleted {len(ids)} items", type="success")
@@ -827,15 +827,35 @@ Behaviour:
 - The header checkbox still selects only the current page (same as before — preserves muscle memory).
 - As soon as anything is selected, an info banner appears above the table:
   *"N items on this page selected. [Select all matching] [Clear selection]"*
-- Clicking **Select all matching** calls a new framework-registered endpoint `GET /{name}/select-all-ids` that re-runs the active search + filter-badge + header-filter query and returns every matching primary-key id as JSON. The banner flips to *"All X matching items are selected."*
-- Clicking any action button in **With Selected** while in "all matching" mode posts the full id list to your existing `hx_post` handler — **no handler code changes**. Your `confirm` string is rendered with the full count via `{count}`.
+- Clicking **Select all matching** calls a framework-registered endpoint `GET /{name}/select-all-ids` that re-runs the active search + filter-badge + header-filter query and returns matching primary-key ids as JSON (capped at 50,000 — see below). The banner flips to *"All X matching items are selected."*, or *"First 50000 of N matching items selected (max 50000 per action — refine your filter to act on the rest)."* if the result set was truncated.
+- Clicking any action button in **With Selected** while in "all matching" mode posts the full id list to your `hx_post` handler. Your `confirm` string is rendered with the full count via `{count}`.
 - Selection survives pagination: clicking any page link keeps the checked set (both for manual checks across pages and for "all matching" mode). This is backed by `sessionStorage` keyed on the view name plus a filter "signature" derived from the URL params (excluding `page`).
 - Any change to search/filter/header-filter (HTMX table-body swap) automatically clears the selection so stale ids can never be posted.
 
 Only the GET `/{name}/select-all-ids` route is auto-registered when the flag is on; it respects the same `allowed_users` / `allowed_groups` checks as the rest of the view.
 
+#### Wire format and 50,000-row cap
+
+Action POSTs send a **single** form field named `ids` whose value is a comma-joined string of primary-key ids (`"1,2,3,..."`). Parse it on the server with:
+
+```python
+ids = [i for i in form.get("ids", "").split(",") if i]
+```
+
+Why one field instead of many? Starlette's multipart parser defaults to `max_fields=1000`, so posting one form field per id silently failed any action with more than ~1000 selected rows. The single-field format removes that ceiling entirely while staying compatible with `application/x-www-form-urlencoded` and the standard `Form(...)` dependency.
+
+A hard cap of **50,000 ids per action** is enforced in two places:
+
+- Client-side: the action button refuses to POST a larger selection and shows an alert.
+- Server-side: `/{name}/select-all-ids` returns at most 50,000 ids and sets `truncated: true` plus the real `total` count in its JSON response so the banner can warn the user.
+
+The cap protects the action handler from large `IN(...)` clauses, multipart body size limits, and request timeouts. If you need to act on more than 50,000 rows, narrow the filter or move the bulk operation to a background job.
+
+The action response is now also checked client-side — non-`2xx` responses surface an alert rather than reloading silently.
+
 > **New in 0.5.13:** Added `multi_row_actions` for bulk operations on selected rows.
 > **New in 0.5.31:** Added `multi_row_select_all_pages` flag and `/{name}/select-all-ids` endpoint for cross-page selection that respects the active filter set.
+> **Changed in 0.5.48 (breaking for `multi_row_actions` consumers):** Action POSTs now send a single comma-joined `ids` field instead of one form field per id. Handlers must switch from `form.getlist("ids")` to `form.get("ids", "").split(",")`. Added 50,000-row cap and non-silent error reporting on failed actions.
 
 ### HTMX Polling Columns
 
