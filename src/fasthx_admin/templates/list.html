@@ -439,7 +439,7 @@
        sessionStorage. A filter "signature" (all URL params except `page`)
        guards the stored data so any search/filter change invalidates it. */
     var storageKey = 'multiRowSel_' + viewName;
-    var state = { ids: [], allMatching: false, totalMatching: 0 };
+    var state = { ids: [], allMatching: false, totalMatching: 0, truncated: false, returned: 0, limit: 0 };
     var idSet = new Set();
 
     function currentSig() {
@@ -461,6 +461,9 @@
             state.ids = (s.ids || []).map(String);
             state.allMatching = !!s.allMatching;
             state.totalMatching = s.totalMatching || 0;
+            state.truncated = !!s.truncated;
+            state.returned = s.returned || 0;
+            state.limit = s.limit || 0;
             idSet = new Set(state.ids);
         } catch(e) {}
     }
@@ -472,7 +475,10 @@
                 sig: currentSig(),
                 ids: state.ids,
                 allMatching: state.allMatching,
-                totalMatching: state.totalMatching
+                totalMatching: state.totalMatching,
+                truncated: state.truncated,
+                returned: state.returned,
+                limit: state.limit
             }));
         } catch(e) {}
     }
@@ -493,13 +499,18 @@
     }
 
     function updateUI() {
-        var count = state.allMatching ? state.totalMatching : idSet.size;
+        var count = state.allMatching ? idSet.size : idSet.size;
         countSpan.textContent = count;
         actionsGroup.style.display = count > 0 ? '' : 'none';
 
         if (!crossPage || !banner) return;
         if (state.allMatching) {
-            bannerMsg.textContent = 'All ' + state.totalMatching + ' matching items are selected.';
+            if (state.truncated) {
+                bannerMsg.textContent = 'First ' + state.returned + ' of ' + state.totalMatching +
+                    ' matching items selected (max ' + state.limit + ' per action — refine your filter to act on the rest).';
+            } else {
+                bannerMsg.textContent = 'All ' + state.totalMatching + ' matching items are selected.';
+            }
             selectMatchingBtn.style.display = 'none';
             banner.style.setProperty('display', 'flex', 'important');
         } else if (idSet.size > 0) {
@@ -516,6 +527,9 @@
         state.ids = [];
         state.allMatching = false;
         state.totalMatching = 0;
+        state.truncated = false;
+        state.returned = 0;
+        state.limit = 0;
         idSet = new Set();
         if (crossPage) sessionStorage.removeItem(storageKey);
         var boxes = document.querySelectorAll('.multi-row-check');
@@ -558,10 +572,13 @@
             fetch(url, { headers: { 'Accept': 'application/json' } })
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
-                    state.allMatching = true;
-                    state.totalMatching = data.total || (data.ids ? data.ids.length : 0);
                     state.ids = (data.ids || []).map(String);
                     idSet = new Set(state.ids);
+                    state.allMatching = true;
+                    state.totalMatching = data.total || state.ids.length;
+                    state.truncated = !!data.truncated;
+                    state.returned = data.returned || state.ids.length;
+                    state.limit = data.limit || state.ids.length;
                     saveState();
                     var boxes = document.querySelectorAll('.multi-row-check');
                     for (var i = 0; i < boxes.length; i++) boxes[i].checked = true;
@@ -574,7 +591,11 @@
 
     if (clearBtn) clearBtn.addEventListener('click', clearSelection);
 
-    /* Action button clicks — always POST the full id set */
+    /* Action button clicks — POST the full id set as a single comma-separated
+       `ids` form field. One field (regardless of count) sidesteps Starlette's
+       default 1000-field multipart cap; the SELECT_LIMIT mirrors the server-side
+       cap in select-all-ids. */
+    var SELECT_LIMIT = 50000;
     var actionBtns = document.querySelectorAll('.multi-row-action');
     for (var i = 0; i < actionBtns.length; i++) {
         actionBtns[i].addEventListener('click', function(e) {
@@ -583,14 +604,24 @@
             var confirm_msg = this.getAttribute('data-confirm');
             var ids = Array.from(idSet);
             if (ids.length === 0) return;
+            if (ids.length > SELECT_LIMIT) {
+                alert('Selection too large: ' + ids.length + ' items. Maximum is ' + SELECT_LIMIT + ' per action.');
+                return;
+            }
             if (confirm_msg && !confirm(confirm_msg.replace('{count}', ids.length))) return;
 
             var formData = new FormData();
-            for (var k = 0; k < ids.length; k++) formData.append('ids', ids[k]);
+            formData.append('ids', ids.join(','));
             fetch(url, { method: 'POST', body: formData }).then(function(resp) {
+                if (!resp.ok) {
+                    alert('Action failed (' + resp.status + ' ' + resp.statusText + ')');
+                    return;
+                }
                 /* Action ran — stored ids may now reference deleted/changed rows. */
                 if (crossPage) sessionStorage.removeItem(storageKey);
                 window.location.reload();
+            }).catch(function(err) {
+                alert('Action failed: ' + (err && err.message ? err.message : 'network error'));
             });
         });
     }

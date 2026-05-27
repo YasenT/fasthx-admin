@@ -34,6 +34,12 @@ from .database import get_db
 
 _PACKAGE_DIR = Path(__file__).resolve().parent
 
+# Hard cap on multi_row_select_all_pages selection size. Bulk actions POST
+# ids as a single comma-separated `ids` form field, so the ceiling here is
+# really about the action handler's memory + DB IN(...) clause cost, not
+# multipart field count.
+MULTI_ROW_SELECT_LIMIT = 50_000
+
 # Maps SQLAlchemy column types to HTML input types
 COLUMN_TYPE_MAP = {
     "Integer": "number",
@@ -1324,8 +1330,19 @@ class CRUDView:
                             query = query.filter(cast(col, String).ilike(f"%{val}%"))
 
             pk_col = getattr(model, view.pk_field)
-            ids = [row[0] for row in query.with_entities(pk_col).all()]
-            return JSONResponse({"ids": ids, "total": len(ids)})
+            # Cap bulk selection at MULTI_ROW_SELECT_LIMIT to stay within the
+            # multi_row_actions wire contract (single comma-joined `ids` field).
+            id_query = query.with_entities(pk_col)
+            total = id_query.count()
+            ids = [row[0] for row in id_query.limit(MULTI_ROW_SELECT_LIMIT).all()]
+            truncated = total > len(ids)
+            return JSONResponse({
+                "ids": ids,
+                "total": total,
+                "returned": len(ids),
+                "truncated": truncated,
+                "limit": MULTI_ROW_SELECT_LIMIT,
+            })
 
         select_all_ids.__name__ = f"{self.name}_select_all_ids"
         self.router.add_api_route(
