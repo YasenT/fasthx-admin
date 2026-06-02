@@ -1099,10 +1099,12 @@ class CRUDView:
                         target_mapper = inspect(target_model)
                         for tcol in target_mapper.columns:
                             if isinstance(tcol.type, String):
-                                search_filters.append(tcol.ilike(f"%{search}%"))
-                elif isinstance(col.type, String):
-                    search_filters.append(col.ilike(f"%{search}%"))
+                                search_filters.append(cast(tcol, String).ilike(f"%{search}%"))
                 else:
+                    # Always cast to String: some declared String columns map to
+                    # Postgres types without a text ILIKE operator (e.g. cidr/inet),
+                    # so trusting the declared type is unsafe. Casting a real varchar
+                    # is effectively a no-op for a leading-% search (no index use anyway).
                     search_filters.append(cast(col, String).ilike(f"%{search}%"))
             if search_filters:
                 query = query.filter(or_(*search_filters))
