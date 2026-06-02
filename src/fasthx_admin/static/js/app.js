@@ -192,6 +192,14 @@ function getAjaxTomSelectOptions(el) {
         create: false,
         placeholder: placeholder,
         allowEmptyOption: false,
+        // Load the (empty-query) first page once on initial focus. Using the
+        // built-in preload guard fixes edit forms where the preselected value
+        // already counts as an option and would otherwise suppress the load.
+        preload: 'focus',
+        // Default maxOptions (50) makes virtual_scroll's canLoadMore bail after
+        // 5 pages and truncates the list, so large datasets can never be fully
+        // scrolled. null removes the cap so paging continues on scroll.
+        maxOptions: null,
         valueField: 'value',
         labelField: 'label',
         searchField: 'label',
@@ -254,13 +262,7 @@ function initTomSelect(root) {
         }
         var ts = new TomSelect(el, opts);
         styleTomSelect(ts);
-        if (el.hasAttribute('data-ajax-url')) {
-            ts.on('focus', function () {
-                if (!Object.keys(ts.options).length) {
-                    ts.load('');
-                }
-            });
-        }
+        // Initial ajax load is handled by preload:'focus' in getAjaxTomSelectOptions.
     });
 }
 
