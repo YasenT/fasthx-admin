@@ -956,8 +956,13 @@ class CRUDView:
             target_model = config["model"]
             search_fields = config.get("fields", [])
             page_size = config.get("page_size", 10)
+            # Optional result-set constraints:
+            #   "filters": list of SQLAlchemy expressions applied to every query
+            #   "query_filter": callable (query, db, request) -> query, for dynamic/request-aware filtering
+            static_filters = config.get("filters", [])
+            query_filter = config.get("query_filter")
 
-            def make_handler(fk, tgt_model, s_fields, p_size):
+            def make_handler(fk, tgt_model, s_fields, p_size, base_filters, q_filter):
                 def search_handler(
                     request: Request,
                     q: str = "",
@@ -970,6 +975,10 @@ class CRUDView:
                     if page < 1:
                         page = 1
                     query = db.query(tgt_model)
+                    for expr in base_filters:
+                        query = query.filter(expr)
+                    if q_filter is not None:
+                        query = q_filter(query, db, request)
                     if q and s_fields:
                         filters = [
                             getattr(tgt_model, f).ilike(f"%{q}%")
@@ -1000,7 +1009,7 @@ class CRUDView:
                 search_handler.__name__ = f"{view.name}_{fk}_ajax_search"
                 return search_handler
 
-            handler = make_handler(field_key, target_model, search_fields, page_size)
+            handler = make_handler(field_key, target_model, search_fields, page_size, static_filters, query_filter)
             self.router.add_api_route(
                 f"/{self.name}/ajax/{field_key}",
                 handler,
