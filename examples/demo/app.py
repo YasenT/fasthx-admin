@@ -531,24 +531,30 @@ class EdgeView(CRUDView):
     @CRUDView.endpoint("/{name}/bulk-reset", methods=["POST"], response_class=HTMLResponse)
     async def bulk_reset(self, request: Request, db: Session = Depends(get_db)):
         form = await request.form()
-        ids = form.getlist("ids")
+        ids = [int(i) for i in form.get("ids", "").split(",") if i.strip()]
         count = 0
         for eid in ids:
-            edge = db.query(self.model).filter(self.model.id == int(eid)).first()
+            edge = db.query(self.model).filter(self.model.id == eid).first()
             if edge:
                 edge.status = EdgeStatus.PENDING
                 edge.deploy_progress = 0
-                self.deploy_progress.pop(int(eid), None)
+                self.deploy_progress.pop(eid, None)
                 count += 1
         db.commit()
+        # Bulk actions submit via fetch() + window.location.reload(), so the list
+        # reloads its current (filtered) URL on its own — the filter is preserved
+        # by the reload. toast_response carries the message in a cookie that
+        # survives that reload (refresh_list_response's headers would be ignored).
         return toast_response(f"Reset {count} edges", type="success", redirect=f"/{self.name}")
 
     @CRUDView.endpoint("/{name}/bulk-delete", methods=["POST"], response_class=HTMLResponse)
     async def bulk_delete(self, request: Request, db: Session = Depends(get_db)):
         form = await request.form()
-        ids = form.getlist("ids")
-        count = db.query(self.model).filter(self.model.id.in_([int(i) for i in ids])).delete(synchronize_session=False)
+        ids = [int(i) for i in form.get("ids", "").split(",") if i.strip()]
+        count = db.query(self.model).filter(self.model.id.in_(ids)).delete(synchronize_session=False)
         db.commit()
+        # Bulk actions submit via fetch() + window.location.reload() (see bulk_reset),
+        # so the filter is preserved by the reload and the toast rides a cookie.
         return toast_response(f"Deleted {count} edges", type="success", redirect=f"/{self.name}")
 
     @CRUDView.endpoint("/{name}/{item_id}/reset", methods=["POST"], response_class=HTMLResponse)
@@ -560,7 +566,8 @@ class EdgeView(CRUDView):
         edge.deploy_progress = 0
         db.commit()
         self.deploy_progress.pop(item_id, None)
-        return toast_response("Edge reset successfully", type="success", redirect=f"/{self.name}")
+        # Refresh the list in place, preserving the active search/filter/sort state.
+        return refresh_list_response(request, message="Edge reset successfully", type="success")
 
 
 # --- Register views ---
