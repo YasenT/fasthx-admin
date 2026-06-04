@@ -169,7 +169,7 @@
 
 {% block extra_js %}
 {% if dashboard_charts %}
-<script src="https://cdn.jsdelivr.net/npm/apexcharts@3.54.1"></script>
+<script src="{{ static_url }}/vendor/apexcharts/apexcharts.min.js"></script>
 <script>
 (function() {
     var chartConfigs = {{ dashboard_charts | tojson }};

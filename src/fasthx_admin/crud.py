@@ -186,6 +186,101 @@ def toast_response(
     return response
 
 
+def refresh_list_response(
+    request,
+    message: str | None = None,
+    type: str = "success",
+    title: str | None = None,
+    full_reload: bool = False,
+    status_code: int = 200,
+) -> HTMLResponse:
+    """Refresh the current list view after a row action, preserving its state.
+
+    A list view keeps all of its state — search ``q``, ``flt*`` filters,
+    ``sort``/``order`` and ``page`` — in the URL query string. A plain
+    ``HX-Redirect`` to ``/{name}`` throws that away, which is why custom
+    ``row_actions`` lose the active search/filter when they redirect.
+
+    This helper reads the current state from the ``Referer`` header (the list
+    URL the action was triggered from) and reloads the list *with that state
+    intact*. By default it refreshes only the table body in place via
+    ``HX-Location`` (no full-page reload, scroll position preserved); set
+    ``full_reload=True`` to use a full-page ``HX-Redirect`` instead.
+
+    Usage in a row-action endpoint::
+
+        @self.router.post(f"/{self.name}/{{item_id}}/build")
+        async def build(request: Request, item_id: int, db: Session = Depends(get_db)):
+            ...
+            db.commit()
+            return refresh_list_response(request, message="Build started")
+
+    Args:
+        request: The FastAPI ``Request`` — its ``Referer`` carries the state.
+        message: Optional toast message shown after the refresh.
+        type: Toast type — "success", "danger", "warning", "info".
+        title: Optional toast title (defaults to capitalised type client-side).
+        full_reload: When True, do a full-page redirect instead of an in-place
+            table-body swap.
+        status_code: HTTP status code (default 200).
+    """
+    import urllib.parse
+    from urllib.parse import urlparse, parse_qsl, urlencode
+
+    toast_data: Optional[Dict[str, Any]] = None
+    if message:
+        toast_data = {"message": message, "type": type}
+        if title:
+            toast_data["title"] = title
+
+    referer = request.headers.get("referer") if request else None
+    ref_path = ref_query = None
+    if referer:
+        parsed = urlparse(referer)
+        ref_path, ref_query = parsed.path, parsed.query
+
+    # Without a usable Referer we cannot reconstruct the list URL/state. Fall
+    # back to a plain toast — no navigation happens, so nothing is lost, and the
+    # caller's hx-target still handles any row-level swap.
+    if not ref_path:
+        headers: Dict[str, str] = {}
+        if toast_data:
+            headers["HX-Trigger"] = json.dumps({"showToast": toast_data})
+        return HTMLResponse("", status_code=status_code, headers=headers)
+
+    if full_reload:
+        # Full-page redirect back to the list with its query string intact.
+        redirect = ref_path + (("?" + ref_query) if ref_query else "")
+        response = HTMLResponse(
+            "", status_code=status_code, headers={"HX-Redirect": redirect}
+        )
+        if toast_data:
+            response.set_cookie(
+                "_toast",
+                urllib.parse.quote(json.dumps(toast_data)),
+                max_age=10,
+                httponly=False,
+                samesite="lax",
+            )
+        return response
+
+    # In-place refresh: re-fetch the list partial and swap only the table body.
+    # Re-use the Referer's query string (search/filter/sort/page) for the path,
+    # and pass ``partial=1`` via ``values`` (not the path) so the list endpoint
+    # returns the table_body fragment while the URL htmx pushes stays clean.
+    params = [(k, v) for k, v in parse_qsl(ref_query, keep_blank_values=False) if k != "partial"]
+    location = {
+        "path": ref_path + (("?" + urlencode(params)) if params else ""),
+        "target": "#table-body",
+        "swap": "innerHTML",
+        "values": {"partial": "1"},
+    }
+    headers = {"HX-Location": json.dumps(location)}
+    if toast_data:
+        headers["HX-Trigger"] = json.dumps({"showToast": toast_data})
+    return HTMLResponse("", status_code=status_code, headers=headers)
+
+
 def modal_response(
     title: str,
     body: str,

@@ -23,7 +23,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from fasthx_admin import Admin, CRUDView, Base, init_db, get_db, get_current_user, oidc_login, AuthError, tool_registry, toast_response, console_response, console_sse_message, ValidationError
+from fasthx_admin import Admin, CRUDView, Base, init_db, get_db, get_current_user, oidc_login, AuthError, tool_registry, toast_response, refresh_list_response, console_response, console_sse_message, ValidationError
 
 from models import Customer, Orchestrator, FortiEdge, BuildStatus, EdgeStatus
 
@@ -305,7 +305,9 @@ class OrchestratorView(CRUDView):
                 return HTMLResponse("Not found", status_code=404)
             orch.build_status = BuildStatus.BUILDING
             db.commit()
-            return HTMLResponse("", headers={"HX-Redirect": f"/{view.name}"})
+            # Refresh the list in place, preserving the active search/filter/sort
+            # state instead of redirecting to a bare URL (which would reset it).
+            return refresh_list_response(request, message="Build started", type="success")
 
         @self.router.get("/api/orchestrators-for-customer", response_class=HTMLResponse)
         async def orchestrators_for_customer(
