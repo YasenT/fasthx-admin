@@ -619,7 +619,12 @@
                 }
                 /* Action ran — stored ids may now reference deleted/changed rows. */
                 if (crossPage) sessionStorage.removeItem(storageKey);
-                window.location.reload();
+                /* Honor the framework's HX-Redirect idiom: single-row actions
+                   fire through HTMX which follows this header, but multi-row
+                   actions use a plain fetch() and must follow it manually. The
+                   accompanying _toast cookie is popped by app.js after nav. */
+                var dest = resp.headers.get('HX-Redirect');
+                if (dest) { window.location.href = dest; } else { window.location.reload(); }
             }).catch(function(err) {
                 alert('Action failed: ' + (err && err.message ? err.message : 'network error'));
             });
