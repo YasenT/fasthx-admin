@@ -342,9 +342,10 @@ function initDependsOn(root) {
 
 // Auto-fill — a checkbox sets (and locks) other fields' values from a JSON map.
 // Config: data-autofill='{"target_field": "value", ...}' on the checkbox input.
-// Checked -> fill targets with the mapped values and make them read-only.
-// Unchecked (by the user) -> clear targets and re-enable them. On initial render
-// an unchecked box leaves existing values untouched (don't wipe real data on edit).
+// Checked -> remember each target's current value, then fill with the mapped
+// value and make it read-only. Unchecked (by the user) -> restore the remembered
+// value and re-enable the field. On initial render an unchecked box leaves
+// existing values untouched (don't wipe real data on edit).
 function initAutofill(root) {
     var container = root || document;
     container.querySelectorAll('input[type="checkbox"][data-autofill]').forEach(function (ctrl) {
@@ -357,23 +358,27 @@ function initAutofill(root) {
             return;
         }
         var targets = Object.keys(map);
-        var apply = function (clearOnUncheck) {
+        var saved = {}; // last user-entered value per target, captured on check
+        var apply = function (isUserToggle) {
             var checked = ctrl.checked;
             targets.forEach(function (key) {
                 var field = document.getElementById(key);
                 if (!field) return;
                 if (checked) {
+                    if (isUserToggle) saved[key] = field.value; // remember before overwriting
                     field.value = map[key];
                     field.readOnly = true;
                     field.classList.add('bg-body-secondary');
                 } else {
                     field.readOnly = false;
                     field.classList.remove('bg-body-secondary');
-                    if (clearOnUncheck) field.value = '';
+                    if (isUserToggle && saved.hasOwnProperty(key)) {
+                        field.value = saved[key]; // restore what was there before
+                    }
                 }
             });
         };
-        apply(false); // initial: lock when checked, but never clear on load
+        apply(false); // initial: lock when checked, but never touch values on load
         ctrl.addEventListener('change', function () { apply(true); });
     });
 }
