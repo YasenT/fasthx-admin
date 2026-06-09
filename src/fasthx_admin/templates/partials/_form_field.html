@@ -4,6 +4,7 @@
         <input type="checkbox" name="{{ field.key }}" id="{{ field.key }}"
                class="form-check-input" role="switch"
                value="true"
+               {% if field.get('autofill') %}data-autofill='{{ field.autofill | tojson }}'{% endif %}
                {% if field.value %}checked{% endif %}>
         <label for="{{ field.key }}" class="form-check-label">
             {{ field.label }}

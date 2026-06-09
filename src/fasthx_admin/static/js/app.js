@@ -340,6 +340,44 @@ function initDependsOn(root) {
     });
 }
 
+// Auto-fill — a checkbox sets (and locks) other fields' values from a JSON map.
+// Config: data-autofill='{"target_field": "value", ...}' on the checkbox input.
+// Checked -> fill targets with the mapped values and make them read-only.
+// Unchecked (by the user) -> clear targets and re-enable them. On initial render
+// an unchecked box leaves existing values untouched (don't wipe real data on edit).
+function initAutofill(root) {
+    var container = root || document;
+    container.querySelectorAll('input[type="checkbox"][data-autofill]').forEach(function (ctrl) {
+        if (ctrl._autofillInit) return; // guard against double-binding on re-init
+        ctrl._autofillInit = true;
+        var map;
+        try {
+            map = JSON.parse(ctrl.getAttribute('data-autofill'));
+        } catch (e) {
+            return;
+        }
+        var targets = Object.keys(map);
+        var apply = function (clearOnUncheck) {
+            var checked = ctrl.checked;
+            targets.forEach(function (key) {
+                var field = document.getElementById(key);
+                if (!field) return;
+                if (checked) {
+                    field.value = map[key];
+                    field.readOnly = true;
+                    field.classList.add('bg-body-secondary');
+                } else {
+                    field.readOnly = false;
+                    field.classList.remove('bg-body-secondary');
+                    if (clearOnUncheck) field.value = '';
+                }
+            });
+        };
+        apply(false); // initial: lock when checked, but never clear on load
+        ctrl.addEventListener('change', function () { apply(true); });
+    });
+}
+
 // Bootstrap tooltips
 function initTooltips(root) {
     var container = root || document;
@@ -354,6 +392,7 @@ function initTooltips(root) {
 document.addEventListener('DOMContentLoaded', function () {
     initTomSelect();
     initDependsOn();
+    initAutofill();
     initTooltips();
 });
 
@@ -374,6 +413,7 @@ document.addEventListener('htmx:afterSwap', function (event) {
     syncTomSelect(event.detail.target);
     initTomSelect(event.detail.target);
     initDependsOn(event.detail.target);
+    initAutofill(event.detail.target);
     initTooltips(event.detail.target);
     // Auto-open modal when content is swapped into it
     var target = event.detail.target;
@@ -390,6 +430,7 @@ document.addEventListener('htmx:afterSettle', function (event) {
         cleanupTomSelects();
         initTomSelect();
         initDependsOn();
+        initAutofill();
         initTooltips();
     }
 });
@@ -399,6 +440,7 @@ document.addEventListener('htmx:oobAfterSwap', function (event) {
     syncTomSelect(event.detail.target);
     initTomSelect(event.detail.target);
     initDependsOn(event.detail.target);
+    initAutofill(event.detail.target);
     initTooltips(event.detail.target);
 });
 
