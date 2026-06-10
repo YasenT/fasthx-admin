@@ -729,6 +729,8 @@ class EdgeView(CRUDView):
 
 Every row also gets View and Edit buttons automatically (based on permissions), plus a Delete button with confirmation.
 
+> **Tip:** In your row-action endpoint, return [`refresh_list_response(request, ...)`](#refresh_list_response-helper) instead of `toast_response(..., redirect=...)` so the list refreshes in place and keeps the active search/filter/sort/page. A plain redirect reloads the whole page and loses that state.
+
 #### Link-based row actions (file downloads, navigation)
 
 For actions that should trigger a file download or navigate to a URL (instead of an HTMX swap), use `href` instead of `hx_post`:
@@ -1208,8 +1210,44 @@ class EdgeView(CRUDView):
 | `message` | The toast message text |
 | `type` | `"success"`, `"danger"`, `"warning"`, or `"info"` (default) |
 | `title` | Optional title (defaults to capitalised type) |
-| `redirect` | Optional URL — adds `HX-Redirect` header for page navigation after toast |
+| `redirect` | Optional URL — adds `HX-Redirect` header for page navigation after toast. Pass `request=request` too to preserve the list's query string (search/filters/sort/page) via the `Referer`; without it, the redirect goes to the bare URL and **loses list state**. |
 | `status_code` | HTTP status code (default 200) |
+
+### refresh_list_response helper
+
+Use `refresh_list_response()` in a **row action** when you want to refresh the list after the action while keeping the user's current search, filters, sort, and page. Unlike `toast_response(redirect=...)` — which does a full-page `HX-Redirect` and, without `request=`, navigates to the bare `/{name}` and drops list state — this reads the list URL from the `Referer` and re-renders **only the table body** in place (`#table-body`, `partial=1`). No full-page reload, scroll preserved, optional toast shown at the same time.
+
+```python
+from fasthx_admin import CRUDView, refresh_list_response
+
+class EdgeView(CRUDView):
+    model = FortiEdge
+
+    @CRUDView.endpoint("/{name}/{item_id}/reset", methods=["POST"], response_class=HTMLResponse)
+    async def reset(self, request: Request, item_id: int, db: Session = Depends(get_db)):
+        edge = db.query(self.model).filter(self.model.id == item_id).first()
+        if not edge:
+            return refresh_list_response(request, "Edge not found", type="danger")
+        edge.status = "ordered"
+        db.commit()
+        # Refreshes the table in place AND shows the toast — active search/filter survives.
+        return refresh_list_response(request, "Edge reset successfully", type="success")
+```
+
+**Parameters:**
+
+| Parameter | Description |
+|-----------|-------------|
+| `request` | The FastAPI `Request` (required — carries the `Referer` used to reconstruct list state) |
+| `message` | Optional toast message. Omit to refresh the list silently. |
+| `type` | `"success"`, `"danger"`, `"warning"`, or `"info"` (default `"success"`) |
+| `title` | Optional toast title (defaults to capitalised type) |
+| `full_reload` | If `True`, does a full-page `HX-Redirect` back to the list (state still preserved) instead of the in-place `#table-body` swap |
+| `status_code` | HTTP status code (default 200) |
+
+If no usable `Referer` is present, it falls back to a plain toast with no navigation.
+
+> **New in 0.5.54:** Added `refresh_list_response` so row actions can refresh the list and keep search/filter/sort/page state without a full-page reload.
 
 ### JavaScript API
 
