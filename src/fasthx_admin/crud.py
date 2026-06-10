@@ -127,102 +127,51 @@ class ValidationError(Exception):
 
 
 def toast_response(
-    message: str,
+    message: str | None = None,
     type: str = "info",
     title: str | None = None,
     redirect: str | None = None,
     status_code: int = 200,
     request=None,
+    refresh: bool = False,
 ) -> HTMLResponse:
-    """Return an HTMLResponse that triggers a toast notification via HTMX.
+    """Return an HTMLResponse that shows a toast and optionally navigates.
 
-    Usage in a custom endpoint::
+    A single helper for the three things a custom endpoint typically wants to do
+    after an action. Pick the navigation mode with an argument:
 
-        @CRUDView.endpoint("/{name}/{item_id}/deploy", methods=["POST"])
-        async def deploy(self, ...):
-            ...
-            return toast_response("Deployment started!", type="success", redirect=f"/{self.name}", request=request)
+    * **No navigation** (default) — just show the toast::
+
+          return toast_response("Saved!", type="success")
+
+    * **Inline list refresh** (``refresh=True``) — re-render only the current
+      list view's ``#table-body`` in place via ``HX-Location``, preserving its
+      search ``q``, ``flt*``/``cf_*`` filters, ``sort``/``order`` and ``page``.
+      This is what custom ``row_actions`` should use so the active search/filter
+      survives. No full-page reload, scroll position preserved. Requires
+      ``request`` (its ``Referer`` carries the list state); with no usable
+      ``Referer`` it falls back to a plain toast::
+
+          return toast_response("Deployed!", type="success", refresh=True, request=request)
+
+    * **Full-page redirect** (``redirect=...``) — navigate to a URL via
+      ``HX-Redirect``. Pass ``request`` too and, when the redirect targets the
+      same path as the ``Referer``, the list's query string is preserved::
+
+          return toast_response("Created!", type="success", redirect=f"/{self.name}", request=request)
 
     Args:
-        message: The toast message text.
+        message: Toast message text. Omit to navigate/refresh with no toast.
         type: One of "success", "danger", "warning", "info".
         title: Optional title (defaults to capitalised type).
-        redirect: Optional URL — adds HX-Redirect header for page navigation after toast.
+        redirect: Optional URL — full-page ``HX-Redirect`` navigation after toast.
         status_code: HTTP status code (default 200).
-        request: Optional FastAPI Request — when provided, uses the Referer header
-            to preserve query params (search, filters, sort) on redirect.
-    """
-    import urllib.parse
-    toast_data: Dict[str, Any] = {"message": message, "type": type}
-    if title:
-        toast_data["title"] = title
-    headers: Dict[str, str] = {}
-    if redirect:
-        # When a request is provided, use the Referer header to preserve
-        # query params (search, filters, pagination) on redirect.
-        if request:
-            referer = request.headers.get("referer")
-            if referer:
-                from urllib.parse import urlparse
-                ref_parsed = urlparse(referer)
-                redirect_parsed = urlparse(redirect)
-                # Only use Referer if it matches the same path as the redirect
-                if ref_parsed.path.rstrip("/") == redirect_parsed.path.rstrip("/") and ref_parsed.query:
-                    redirect = referer if "://" not in redirect else ref_parsed.path + "?" + ref_parsed.query
-        # When redirecting, pass the toast as a cookie so it survives the
-        # full page navigation triggered by HX-Redirect.
-        headers["HX-Redirect"] = redirect
-    else:
-        headers["HX-Trigger"] = json.dumps({"showToast": toast_data})
-    response = HTMLResponse("", status_code=status_code, headers=headers)
-    if redirect:
-        response.set_cookie(
-            "_toast",
-            urllib.parse.quote(json.dumps(toast_data)),
-            max_age=10,
-            httponly=False,
-            samesite="lax",
-        )
-    return response
-
-
-def refresh_list_response(
-    request,
-    message: str | None = None,
-    type: str = "success",
-    title: str | None = None,
-    full_reload: bool = False,
-    status_code: int = 200,
-) -> HTMLResponse:
-    """Refresh the current list view after a row action, preserving its state.
-
-    A list view keeps all of its state — search ``q``, ``flt*`` filters,
-    ``sort``/``order`` and ``page`` — in the URL query string. A plain
-    ``HX-Redirect`` to ``/{name}`` throws that away, which is why custom
-    ``row_actions`` lose the active search/filter when they redirect.
-
-    This helper reads the current state from the ``Referer`` header (the list
-    URL the action was triggered from) and reloads the list *with that state
-    intact*. By default it refreshes only the table body in place via
-    ``HX-Location`` (no full-page reload, scroll position preserved); set
-    ``full_reload=True`` to use a full-page ``HX-Redirect`` instead.
-
-    Usage in a row-action endpoint::
-
-        @self.router.post(f"/{self.name}/{{item_id}}/build")
-        async def build(request: Request, item_id: int, db: Session = Depends(get_db)):
-            ...
-            db.commit()
-            return refresh_list_response(request, message="Build started")
-
-    Args:
-        request: The FastAPI ``Request`` — its ``Referer`` carries the state.
-        message: Optional toast message shown after the refresh.
-        type: Toast type — "success", "danger", "warning", "info".
-        title: Optional toast title (defaults to capitalised type client-side).
-        full_reload: When True, do a full-page redirect instead of an in-place
-            table-body swap.
-        status_code: HTTP status code (default 200).
+        request: FastAPI ``Request`` — its ``Referer`` carries list state. Required
+            for ``refresh=True``; optional for ``redirect`` (enables state-preserving
+            redirect when paths match).
+        refresh: When True, refresh the current list view's table body in place
+            instead of (or before falling back from) navigating. Takes precedence
+            over ``redirect``.
     """
     import urllib.parse
     from urllib.parse import urlparse, parse_qsl, urlencode
@@ -233,27 +182,43 @@ def refresh_list_response(
         if title:
             toast_data["title"] = title
 
-    referer = request.headers.get("referer") if request else None
-    ref_path = ref_query = None
-    if referer:
-        parsed = urlparse(referer)
-        ref_path, ref_query = parsed.path, parsed.query
+    headers: Dict[str, str] = {}
 
-    # Without a usable Referer we cannot reconstruct the list URL/state. Fall
-    # back to a plain toast — no navigation happens, so nothing is lost, and the
-    # caller's hx-target still handles any row-level swap.
-    if not ref_path:
-        headers: Dict[str, str] = {}
-        if toast_data:
-            headers["HX-Trigger"] = json.dumps({"showToast": toast_data})
-        return HTMLResponse("", status_code=status_code, headers=headers)
+    # Mode 1 — inline refresh of the current list view's table body.
+    if refresh:
+        referer = request.headers.get("referer") if request else None
+        if referer:
+            parsed = urlparse(referer)
+            ref_path, ref_query = parsed.path, parsed.query
+            # Re-use the Referer's query string (search/filter/sort/page) for the
+            # path, and pass ``partial=1`` via ``values`` so the list endpoint
+            # returns the table_body fragment while the pushed URL stays clean.
+            params = [(k, v) for k, v in parse_qsl(ref_query, keep_blank_values=False) if k != "partial"]
+            location = {
+                "path": ref_path + (("?" + urlencode(params)) if params else ""),
+                "target": "#table-body",
+                "swap": "innerHTML",
+                "values": {"partial": "1"},
+            }
+            headers["HX-Location"] = json.dumps(location)
+            if toast_data:
+                headers["HX-Trigger"] = json.dumps({"showToast": toast_data})
+            return HTMLResponse("", status_code=status_code, headers=headers)
+        # No usable Referer — fall through to a plain toast (nothing is lost).
 
-    if full_reload:
-        # Full-page redirect back to the list with its query string intact.
-        redirect = ref_path + (("?" + ref_query) if ref_query else "")
-        response = HTMLResponse(
-            "", status_code=status_code, headers={"HX-Redirect": redirect}
-        )
+    # Mode 2 — full-page redirect (optionally preserving list state via Referer).
+    if redirect:
+        if request:
+            referer = request.headers.get("referer")
+            if referer:
+                ref_parsed = urlparse(referer)
+                redirect_parsed = urlparse(redirect)
+                # Only use Referer if it matches the same path as the redirect
+                if ref_parsed.path.rstrip("/") == redirect_parsed.path.rstrip("/") and ref_parsed.query:
+                    redirect = referer if "://" not in redirect else ref_parsed.path + "?" + ref_parsed.query
+        # Pass the toast as a cookie so it survives the full page navigation.
+        headers["HX-Redirect"] = redirect
+        response = HTMLResponse("", status_code=status_code, headers=headers)
         if toast_data:
             response.set_cookie(
                 "_toast",
@@ -264,21 +229,44 @@ def refresh_list_response(
             )
         return response
 
-    # In-place refresh: re-fetch the list partial and swap only the table body.
-    # Re-use the Referer's query string (search/filter/sort/page) for the path,
-    # and pass ``partial=1`` via ``values`` (not the path) so the list endpoint
-    # returns the table_body fragment while the URL htmx pushes stays clean.
-    params = [(k, v) for k, v in parse_qsl(ref_query, keep_blank_values=False) if k != "partial"]
-    location = {
-        "path": ref_path + (("?" + urlencode(params)) if params else ""),
-        "target": "#table-body",
-        "swap": "innerHTML",
-        "values": {"partial": "1"},
-    }
-    headers = {"HX-Location": json.dumps(location)}
+    # Mode 3 — plain toast, no navigation.
     if toast_data:
         headers["HX-Trigger"] = json.dumps({"showToast": toast_data})
     return HTMLResponse("", status_code=status_code, headers=headers)
+
+
+def refresh_list_response(
+    request,
+    message: str | None = None,
+    type: str = "success",
+    title: str | None = None,
+    full_reload: bool = False,
+    status_code: int = 200,
+) -> HTMLResponse:
+    """Deprecated alias for :func:`toast_response` with ``refresh=True``.
+
+    Kept for backwards compatibility (this helper shipped in 0.5.54). New code
+    should call ``toast_response`` directly::
+
+        toast_response(message, refresh=True, request=request)        # in-place list refresh
+        toast_response(message, redirect=referer, request=request)    # full-page reload
+
+    ``full_reload=True`` maps to a full-page ``HX-Redirect`` back to the list
+    (via the ``Referer``); the default maps to the in-place table-body refresh.
+    """
+    if full_reload:
+        referer = request.headers.get("referer") if request else None
+        if referer:
+            return toast_response(
+                message, type=type, title=title,
+                redirect=referer, request=request, status_code=status_code,
+            )
+        # No Referer to redirect back to — just show the toast.
+        return toast_response(message, type=type, title=title, status_code=status_code)
+    return toast_response(
+        message, type=type, title=title,
+        refresh=True, request=request, status_code=status_code,
+    )
 
 
 def modal_response(

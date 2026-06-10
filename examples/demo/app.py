@@ -23,7 +23,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from fasthx_admin import Admin, CRUDView, Base, init_db, get_db, get_current_user, oidc_login, AuthError, tool_registry, toast_response, refresh_list_response, console_response, console_sse_message, ValidationError
+from fasthx_admin import Admin, CRUDView, Base, init_db, get_db, get_current_user, oidc_login, AuthError, tool_registry, toast_response, console_response, console_sse_message, ValidationError
 
 from models import Customer, Orchestrator, FortiEdge, BuildStatus, EdgeStatus
 
@@ -307,7 +307,7 @@ class OrchestratorView(CRUDView):
             db.commit()
             # Refresh the list in place, preserving the active search/filter/sort
             # state instead of redirecting to a bare URL (which would reset it).
-            return refresh_list_response(request, message="Build started", type="success")
+            return toast_response("Build started", type="success", refresh=True, request=request)
 
         @self.router.get("/api/orchestrators-for-customer", response_class=HTMLResponse)
         async def orchestrators_for_customer(
@@ -544,7 +544,7 @@ class EdgeView(CRUDView):
         # Bulk actions submit via fetch() + window.location.reload(), so the list
         # reloads its current (filtered) URL on its own — the filter is preserved
         # by the reload. toast_response carries the message in a cookie that
-        # survives that reload (refresh_list_response's headers would be ignored).
+        # survives that reload (a refresh=True HX-Location header would be ignored).
         return toast_response(f"Reset {count} edges", type="success", redirect=f"/{self.name}")
 
     @CRUDView.endpoint("/{name}/bulk-delete", methods=["POST"], response_class=HTMLResponse)
@@ -567,7 +567,7 @@ class EdgeView(CRUDView):
         db.commit()
         self.deploy_progress.pop(item_id, None)
         # Refresh the list in place, preserving the active search/filter/sort state.
-        return refresh_list_response(request, message="Edge reset successfully", type="success")
+        return toast_response("Edge reset successfully", type="success", refresh=True, request=request)
 
 
 # --- Register views ---

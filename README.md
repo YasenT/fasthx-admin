@@ -729,7 +729,7 @@ class EdgeView(CRUDView):
 
 Every row also gets View and Edit buttons automatically (based on permissions), plus a Delete button with confirmation.
 
-> **Tip:** In your row-action endpoint, return [`refresh_list_response(request, ...)`](#refresh_list_response-helper) instead of `toast_response(..., redirect=...)` so the list refreshes in place and keeps the active search/filter/sort/page. A plain redirect reloads the whole page and loses that state.
+> **Tip:** In your row-action endpoint, return [`toast_response(..., refresh=True, request=request)`](#toast_response-helper) instead of `toast_response(..., redirect=...)` so the list refreshes in place and keeps the active search/filter/sort/page. A plain redirect reloads the whole page and loses that state.
 
 #### Link-based row actions (file downloads, navigation)
 
@@ -1185,7 +1185,7 @@ fasthx-admin includes a built-in toast notification system powered by Bootstrap 
 
 ### toast_response helper
 
-Use `toast_response()` in custom endpoints to show a toast after an action:
+Use `toast_response()` in custom endpoints to show a toast and, optionally, navigate afterwards. One helper covers the three things an action endpoint typically needs — pick the navigation mode with an argument:
 
 ```python
 from fasthx_admin import CRUDView, toast_response
@@ -1200,54 +1200,35 @@ class EdgeView(CRUDView):
             return toast_response("Edge not found", type="danger", status_code=404)
 
         # ... start deployment ...
-        return toast_response("Deployment started!", type="success", redirect=f"/{self.name}")
+        # Inline-refresh the list in place, keeping the active search/filter/sort/page.
+        return toast_response("Deployment started!", type="success", refresh=True, request=request)
 ```
+
+**Three modes:**
+
+| Goal | Call |
+|---|---|
+| Just show a toast (no navigation) | `toast_response("Saved!", type="success")` |
+| Refresh the current list **in place**, preserving search/filter/sort/page | `toast_response("Done", type="success", refresh=True, request=request)` |
+| **Full-page** navigate to a URL | `toast_response("Created", type="success", redirect="/edges", request=request)` |
+
+`refresh=True` is what **row actions** should use: it re-renders only the list's `#table-body` via `HX-Location` (no full-page reload, scroll preserved) using the `Referer` to keep the active search/filters/sort/page. With no usable `Referer` it falls back to a plain toast. `redirect=...` does a full-page `HX-Redirect`; pass `request=` too and, when the redirect targets the same path as the `Referer`, the list's query string is preserved.
 
 **Parameters:**
 
 | Parameter | Description |
 |-----------|-------------|
-| `message` | The toast message text |
-| `type` | `"success"`, `"danger"`, `"warning"`, or `"info"` (default) |
+| `message` | Toast message text. Omit to navigate/refresh with no toast. |
+| `type` | `"success"`, `"danger"`, `"warning"`, or `"info"` (default `"info"`) |
 | `title` | Optional title (defaults to capitalised type) |
-| `redirect` | Optional URL — adds `HX-Redirect` header for page navigation after toast. Pass `request=request` too to preserve the list's query string (search/filters/sort/page) via the `Referer`; without it, the redirect goes to the bare URL and **loses list state**. |
+| `redirect` | Optional URL — full-page `HX-Redirect` after the toast. Pass `request=` to preserve the list's query string via the `Referer`. |
+| `refresh` | If `True`, refresh the current list view's `#table-body` in place instead of navigating (requires `request`). Takes precedence over `redirect`. |
+| `request` | FastAPI `Request` — required for `refresh=True`; optional for `redirect` (enables state-preserving redirect). |
 | `status_code` | HTTP status code (default 200) |
 
-### refresh_list_response helper
-
-Use `refresh_list_response()` in a **row action** when you want to refresh the list after the action while keeping the user's current search, filters, sort, and page. Unlike `toast_response(redirect=...)` — which does a full-page `HX-Redirect` and, without `request=`, navigates to the bare `/{name}` and drops list state — this reads the list URL from the `Referer` and re-renders **only the table body** in place (`#table-body`, `partial=1`). No full-page reload, scroll preserved, optional toast shown at the same time.
-
-```python
-from fasthx_admin import CRUDView, refresh_list_response
-
-class EdgeView(CRUDView):
-    model = FortiEdge
-
-    @CRUDView.endpoint("/{name}/{item_id}/reset", methods=["POST"], response_class=HTMLResponse)
-    async def reset(self, request: Request, item_id: int, db: Session = Depends(get_db)):
-        edge = db.query(self.model).filter(self.model.id == item_id).first()
-        if not edge:
-            return refresh_list_response(request, "Edge not found", type="danger")
-        edge.status = "ordered"
-        db.commit()
-        # Refreshes the table in place AND shows the toast — active search/filter survives.
-        return refresh_list_response(request, "Edge reset successfully", type="success")
-```
-
-**Parameters:**
-
-| Parameter | Description |
-|-----------|-------------|
-| `request` | The FastAPI `Request` (required — carries the `Referer` used to reconstruct list state) |
-| `message` | Optional toast message. Omit to refresh the list silently. |
-| `type` | `"success"`, `"danger"`, `"warning"`, or `"info"` (default `"success"`) |
-| `title` | Optional toast title (defaults to capitalised type) |
-| `full_reload` | If `True`, does a full-page `HX-Redirect` back to the list (state still preserved) instead of the in-place `#table-body` swap |
-| `status_code` | HTTP status code (default 200) |
-
-If no usable `Referer` is present, it falls back to a plain toast with no navigation.
-
-> **New in 0.5.54:** Added `refresh_list_response` so row actions can refresh the list and keep search/filter/sort/page state without a full-page reload.
+> **Deprecated:** `refresh_list_response(request, message, ...)` (added in 0.5.54) is now a thin alias for `toast_response(message, refresh=True, request=request)` and remains exported for backwards compatibility. New code should call `toast_response(..., refresh=True)` directly.
+>
+> **Changed in 0.5.58:** Collapsed `refresh_list_response` into `toast_response` via the new `refresh=` flag — one helper for toast + navigation. The old name still works as an alias.
 
 ### JavaScript API
 
