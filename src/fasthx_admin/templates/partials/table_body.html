@@ -30,6 +30,11 @@
     </td>
     {% endfor %}
 </tr>
+{% if row.progress %}
+{% with view_name=view.name, item_id=row._id, progress=row.progress.progress, status=row.progress.status, colspan=progress_colspan %}
+{% include "partials/progress_bar.html" %}
+{% endwith %}
+{% endif %}
 {% else %}
 <tr>
     <td colspan="{{ columns|length + (1 if row_actions or view.can_edit or view.can_delete else 0) + (1 if view.multi_row_actions else 0) }}" class="text-center text-muted py-4">

@@ -1216,6 +1216,41 @@ class CRUDView:
         show_actions = self.row_actions or self.can_edit or self.can_delete
         return len(self.columns_meta) + (1 if show_actions else 0)
 
+    def _active_progress(self, item_ids) -> Dict[Any, Dict[str, Any]]:
+        """Return ``{item_id: {"progress": int, "status": str}}`` for rows that
+        have an in-progress (non-terminal) progress bar stored in Redis.
+
+        Used to re-hydrate progress bars on a full page load / table refresh —
+        without this, a bar inserted by ``progress_response`` vanishes the moment
+        the page is reloaded, because the initial render only reads model values.
+
+        Only genuinely in-flight bars (0 <= progress < 100, not "Error") are
+        returned; terminal states are skipped since the column value already
+        reflects the final outcome and polling has stopped.
+        """
+        if not self.progress_redis_url or not item_ids:
+            return {}
+        if not any(a.get("progress") for a in self.row_actions):
+            return {}
+        try:
+            import redis as redis_lib
+            r = redis_lib.Redis.from_url(self.progress_redis_url, decode_responses=True)
+            raws = r.mget([f"{self.name}:{i}:progress" for i in item_ids])
+        except Exception:
+            return {}
+        active: Dict[Any, Dict[str, Any]] = {}
+        for item_id, raw in zip(item_ids, raws):
+            if raw is None or raw == "Error":
+                continue
+            try:
+                val = int(raw)
+            except (ValueError, TypeError):
+                continue
+            if val >= 100:
+                continue
+            active[item_id] = {"progress": val, "status": "Deploying..."}
+        return active
+
     def progress_response(self, request: Request, item_id, item=None, progress: int = 0, status: str = "Starting..."):
         """Return an HTMLResponse rendering the progress bar row.
 
@@ -1651,6 +1686,13 @@ class CRUDView:
                     }
                 rows.append(row)
 
+            # Re-hydrate any in-flight progress bars from Redis so they survive a
+            # full page load / table refresh (not just the initial afterend insert).
+            active_progress = view._active_progress([row["_id"] for row in rows])
+            if active_progress:
+                for row in rows:
+                    row["progress"] = active_progress.get(row["_id"])
+
             # Build filter definitions for the template
             filter_defs = _build_filter_defs(view, model, db)
 
@@ -1669,6 +1711,7 @@ class CRUDView:
                 "filter_defs": filter_defs,
                 "active_filters": active_filters,
                 "header_filter_values": header_filter_values,
+                "progress_colspan": view.get_colspan(),
             }
 
             if request.headers.get("HX-Request") and request.query_params.get("partial"):

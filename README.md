@@ -1798,6 +1798,10 @@ fasthx-admin includes a built-in Redis-backed progress bar that uses HTMX auto-p
 4. Your background worker updates a Redis key as it progresses
 5. The polling endpoint reads Redis and renders the progress bar until complete
 
+Active progress bars **survive a page refresh**: on every list render the view checks Redis for in-flight bars (`0 ≤ progress < 100`) on the visible rows and re-inserts them with polling already running. Completed (`≥ 100`) and `"Error"` bars are not re-shown on reload — the column value already reflects the final outcome. The lookup is a single batched `MGET` and is skipped entirely unless `progress_redis_url` is set and a row action has `"progress": True`.
+
+> **New in 0.5.59:** Progress bars now re-hydrate from Redis on page refresh instead of disappearing.
+
 ### Redis key convention
 
 ```
