@@ -291,7 +291,9 @@ body {
 /* Collapsible items container */
 .sidebar-category-items {
     overflow: hidden;
-    max-height: 500px;
+    /* Generous cap so long categories never clip their last item; the
+       parent .sidebar-nav scrolls when total content exceeds the viewport. */
+    max-height: 2000px;
     transition: max-height 0.25s ease;
 }
 
