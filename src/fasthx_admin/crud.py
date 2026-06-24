@@ -27,6 +27,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import inspect, or_, String, cast
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlalchemy.sql.selectable import Join
 from celery import Celery
 
 from .auth import get_current_user
@@ -104,6 +105,31 @@ FILTER_TYPE_OPS = {
 
 # Global registry of model classes by table name, populated during CRUDView init
 _model_registry: Dict[str, Any] = {}
+
+
+def _joined_table_names(query) -> set:
+    """Table names already present in *query*'s FROM clause / JOINs.
+
+    Lets a later join site skip a table that an earlier one (the search path,
+    a column filter, or a subclass ``_build_query`` override) has already
+    joined, avoiding a duplicate ``LEFT OUTER JOIN`` that Postgres rejects with
+    ``DuplicateAlias``. Introspects the compiled FROM list, so it is agnostic
+    to *how* the join was added.
+    """
+    names: set = set()
+
+    def _walk(fc):
+        if isinstance(fc, Join):  # ORM joins are _ORMJoin, a Join subclass
+            _walk(fc.left)
+            _walk(fc.right)
+        else:
+            name = getattr(fc, "name", None)
+            if name:
+                names.add(name)
+
+    for fc in query.selectable.get_final_froms():
+        _walk(fc)
+    return names
 
 
 class ValidationError(Exception):
@@ -1437,7 +1463,6 @@ class CRUDView:
 
             if header_filter_values:
                 mapper = inspect(model)
-                hf_joined = set()
                 for col_key, val in header_filter_values.items():
                     if "." in col_key:
                         fk_col, target_col_name = col_key.split(".", 1)
@@ -1446,17 +1471,16 @@ class CRUDView:
                             target_table = fk.column.table
                             target_model = _model_registry.get(target_table.name)
                             if target_model:
-                                if target_table.name not in hf_joined:
+                                if target_table.name not in _joined_table_names(query):
                                     local_col = mapper.columns[fk_col]
                                     query = query.outerjoin(target_model, local_col == fk.column)
-                                    hf_joined.add(target_table.name)
                                 tcol = getattr(target_model, target_col_name, None)
                                 if tcol is not None:
-                                    query = query.filter(cast(tcol, String).ilike(f"%{val}%"))
+                                    query = query.filter(cast(tcol, String).ilike(f"%{val.strip()}%"))
                     else:
                         col = getattr(model, col_key, None)
                         if col is not None:
-                            query = query.filter(cast(col, String).ilike(f"%{val}%"))
+                            query = query.filter(cast(col, String).ilike(f"%{val.strip()}%"))
 
             pk_col = getattr(model, view.pk_field)
             # Cap bulk selection at MULTI_ROW_SELECT_LIMIT to stay within the
@@ -1643,7 +1667,6 @@ class CRUDView:
             # Apply header filters as "contains" on each column
             if header_filter_values:
                 mapper = inspect(model)
-                hf_joined = set()
                 for col_key, val in header_filter_values.items():
                     # Dotted notation: "serverid.hostname" targets a specific FK column
                     if "." in col_key:
@@ -1653,17 +1676,19 @@ class CRUDView:
                             target_table = fk.column.table
                             target_model = _model_registry.get(target_table.name)
                             if target_model:
-                                if target_table.name not in hf_joined:
+                                # Skip the join if the search path (or a subclass
+                                # _build_query) already joined this table, else
+                                # Postgres raises DuplicateAlias.
+                                if target_table.name not in _joined_table_names(query):
                                     local_col = mapper.columns[fk_col]
                                     query = query.outerjoin(target_model, local_col == fk.column)
-                                    hf_joined.add(target_table.name)
                                 tcol = getattr(target_model, target_col_name, None)
                                 if tcol is not None:
-                                    query = query.filter(cast(tcol, String).ilike(f"%{val}%"))
+                                    query = query.filter(cast(tcol, String).ilike(f"%{val.strip()}%"))
                     else:
                         col = getattr(model, col_key, None)
                         if col is not None:
-                            query = query.filter(cast(col, String).ilike(f"%{val}%"))
+                            query = query.filter(cast(col, String).ilike(f"%{val.strip()}%"))
             total = query.count()
             total_pages = max(1, math.ceil(total / view.page_size))
             page = max(1, min(page, total_pages))

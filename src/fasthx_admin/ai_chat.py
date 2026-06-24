@@ -28,6 +28,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Stre
 from sqlalchemy import Boolean, Column, DateTime, Float, Integer, String, Text, inspect, text
 from sqlalchemy.orm import Session
 
+from .auth import get_current_user
 from .database import Base, get_db, get_engine
 
 logger = logging.getLogger("fasthx_admin.ai_chat")
@@ -1290,8 +1291,9 @@ def create_ai_chat_router(admin) -> APIRouter:
         except (json.JSONDecodeError, TypeError):
             enabled_hooks = set()
 
-        # Resolve current user (may be None if auth disabled/unresolved)
-        user = getattr(request.state, "user", None)
+        # Resolve current user from the session (mock user when AUTH_DISABLED);
+        # may still be None for an unauthenticated/expired session.
+        user = get_current_user(request)
 
         # Fire session_start hooks on the first message of a new session.
         if is_new_session:
